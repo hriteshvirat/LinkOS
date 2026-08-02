@@ -120,6 +120,7 @@ final class PhoneWindowController: NSWindowController, NSWindowDelegate {
     
     func windowDidBecomeKey(_ notification: Notification) {
         // Keyboard focus binds automatically
+        guard PhoneSession.shared.isStreaming else { return }
         Task {
             await PhoneSession.shared.resumeSession()
         }

@@ -322,10 +322,24 @@ final class PhoneSession: ObservableObject {
     // MARK: - Private Transport Helper
     
     private func sendControlMessage(_ payload: [String: Any]) async {
+        LinkOSLogger.shared.info("[PhoneSession] (PASS) sendControlMessage triggered with payload: \(payload)", category: .media)
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
+            LinkOSLogger.shared.error("[PhoneSession] (FAIL) Failed to serialize payload or build envelope", category: .media)
             return
         }
-        await ConnectionStateManager.shared.routeMessage(channel: .phone, payload: data, from: DeviceIdentity.deviceId)
+        let envelope = MessageRouter.createEvent(channel: ProtocolConstants.Channel.phone, payload: data)
+        
+        if let activeDevice = AppState.shared.activeConnectedDevice {
+            do {
+                LinkOSLogger.shared.info("[PhoneSession] (PASS) Sending envelope to device \(activeDevice.id) via ConnectionManager", category: .media)
+                try await AppState.shared.connectionManager?.send(envelope, to: activeDevice.id)
+                LinkOSLogger.shared.info("[PhoneSession] (PASS) Envelope sent successfully via ConnectionManager", category: .media)
+            } catch {
+                LinkOSLogger.shared.error("[PhoneSession] (FAIL) Failed to send envelope via ConnectionManager: \(error.localizedDescription)", category: .media)
+            }
+        } else {
+            LinkOSLogger.shared.error("[PhoneSession] (FAIL) No active connected device found in AppState", category: .media)
+        }
     }
 
     // MARK: - AI Agent Screen Context API
