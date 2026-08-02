@@ -21,14 +21,16 @@ class ScreenCapturePermissionActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        LinkOSLogger.info("[PhoneMirroring] (PASS) ScreenCapturePermissionActivity created. Launching MediaProjection permission intent prompt", "PhoneMirroring")
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         startActivityForResult(mpm.createScreenCaptureIntent(), REQUEST_CODE)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == REQUEST_CODE) {
+            LinkOSLogger.info("[PhoneMirroring] (PASS) onActivityResult received: requestCode=$requestCode, resultCode=$resultCode", "PhoneMirroring")
             if (resultCode == RESULT_OK && data != null) {
-                LinkOSLogger.info("Screen capture permission granted.", "PhoneMirroring")
+                LinkOSLogger.info("[PhoneMirroring] (PASS) MediaProjection permission granted by user. Starting PhoneSessionService foreground service intent", "PhoneMirroring")
                 val serviceIntent = Intent(this, PhoneSessionService::class.java).apply {
                     action = "START_STREAM"
                     putExtra("RESULT_CODE", resultCode)
@@ -40,7 +42,7 @@ class ScreenCapturePermissionActivity : Activity() {
                     startService(serviceIntent)
                 }
             } else {
-                LinkOSLogger.error("Screen capture permission denied or cancelled.", "PhoneMirroring")
+                LinkOSLogger.error("[PhoneMirroring] (FAIL) MediaProjection permission denied/cancelled by user or resultCode ($resultCode) is not OK", "PhoneMirroring")
             }
         }
         finish()

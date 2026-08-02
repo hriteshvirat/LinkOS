@@ -725,12 +725,15 @@ class LinkOSService : Service(), ConnectionStateSubscriber {
         if (channel == MessageChannel.PHONE) {
             try {
                 val text = String(payload, Charsets.UTF_8)
+                LinkOSLogger.info("[PhoneMirroring] (PASS) onMessageReceived: channel=PHONE, payload=$text", "PhoneMirroring")
                 val json = org.json.JSONObject(text)
                 val action = json.optString("action")
+                LinkOSLogger.info("[PhoneMirroring] (PASS) Action parsed as: $action", "PhoneMirroring")
                 
                 when (action) {
                     "START_STREAM" -> {
                         serviceScope.launch(Dispatchers.Main) {
+                            LinkOSLogger.info("[PhoneMirroring] (PASS) Launching ScreenCapturePermissionActivity context", "PhoneMirroring")
                             ScreenCapturePermissionActivity.launch(this@LinkOSService)
                         }
                     }

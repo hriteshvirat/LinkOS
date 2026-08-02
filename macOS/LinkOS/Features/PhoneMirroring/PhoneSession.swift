@@ -11,6 +11,12 @@ enum PhoneConnectionState {
     case reconnecting
 }
 
+enum DiagnosticStageStatus: Equatable {
+    case pending
+    case success
+    case failure(String)
+}
+
 @MainActor
 final class PhoneSession: ObservableObject {
     static let shared = PhoneSession()
@@ -26,13 +32,13 @@ final class PhoneSession: ObservableObject {
     @Published var connectionState: PhoneConnectionState = .disconnected
     
     // Diagnostics State
-    @Published var connectionStatus: Bool = false
-    @Published var mediaProjectionStatus: Bool = false
-    @Published var frameCaptureStatus: Bool = false
-    @Published var encoderStatus: Bool = false
-    @Published var networkStatus: Bool = false
-    @Published var decoderStatus: Bool = false
-    @Published var rendererStatus: Bool = false
+    @Published var connectionStatus: DiagnosticStageStatus = .pending
+    @Published var mediaProjectionStatus: DiagnosticStageStatus = .pending
+    @Published var frameCaptureStatus: DiagnosticStageStatus = .pending
+    @Published var encoderStatus: DiagnosticStageStatus = .pending
+    @Published var networkStatus: DiagnosticStageStatus = .pending
+    @Published var decoderStatus: DiagnosticStageStatus = .pending
+    @Published var rendererStatus: DiagnosticStageStatus = .pending
     @Published var diagnosticsTimeoutReached: Bool = false
     @Published var lastErrorMessage: String = ""
     
@@ -66,25 +72,26 @@ final class PhoneSession: ObservableObject {
     }
     
     func resetDiagnostics() {
-        connectionStatus = (connectionState == .connected)
-        mediaProjectionStatus = false
-        frameCaptureStatus = false
-        encoderStatus = false
-        networkStatus = false
-        decoderStatus = false
-        rendererStatus = false
+        connectionStatus = (connectionState == .connected) ? .success : .pending
+        mediaProjectionStatus = .pending
+        frameCaptureStatus = .pending
+        encoderStatus = .pending
+        networkStatus = .pending
+        decoderStatus = .pending
+        rendererStatus = .pending
         diagnosticsTimeoutReached = false
         lastErrorMessage = ""
     }
     
     func updateDiagnostic(stage: String, ok: Bool, error: String) {
+        let status: DiagnosticStageStatus = ok ? .success : .failure(error)
         switch stage {
         case "media_projection":
-            mediaProjectionStatus = ok
+            mediaProjectionStatus = status
         case "frame_capture":
-            frameCaptureStatus = ok
+            frameCaptureStatus = status
         case "encoder":
-            encoderStatus = ok
+            encoderStatus = status
         default:
             break
         }
@@ -99,12 +106,13 @@ final class PhoneSession: ObservableObject {
     // MARK: - Lifecycle Controls
     
     func startSession() async {
-        LinkOSLogger.shared.info("[PhoneSession] Starting Phone Mirroring session", category: .media)
+        LinkOSLogger.shared.info("[PhoneSession] (PASS) startSession called", category: .media)
         resetDiagnostics()
         let payload: [String: Any] = [
             "action": "START_STREAM"
         ]
         await sendControlMessage(payload)
+        LinkOSLogger.shared.info("[PhoneSession] (PASS) START_STREAM payload serialized & sent via ConnectionStateManager", category: .media)
         isStreaming = true
         connectionState = .connected
         await PhoneAudioService.shared.startPlayback()
@@ -197,9 +205,10 @@ final class PhoneSession: ObservableObject {
         self.latencyMs = (self.latencyMs * 0.9) + (calcLatency * 0.1) // Smooth latency jitter
         
         // Mark network connection payload received
-        if !networkStatus {
+        if networkStatus == .pending {
             DispatchQueue.main.async {
-                self.networkStatus = true
+                LinkOSLogger.shared.info("[PhoneSession] (PASS) First raw frame packet received on Mac: size=\(data.count) bytes", category: .media)
+                self.networkStatus = .success
             }
         }
         
@@ -212,16 +221,24 @@ final class PhoneSession: ObservableObject {
                       shouldInterpolate: false,
                       intent: .defaultIntent
                   ) else {
+                DispatchQueue.main.async {
+                    if self.decoderStatus == .pending {
+                        LinkOSLogger.shared.error("[PhoneSession] (FAIL) Failed to decode first frame", category: .media)
+                        self.decoderStatus = .failure("JPEG Decoding failed")
+                    }
+                }
                 return
             }
             
             DispatchQueue.main.async {
-                if !self.decoderStatus {
-                    self.decoderStatus = true
+                if self.decoderStatus == .pending {
+                    LinkOSLogger.shared.info("[PhoneSession] (PASS) Frame #1 successfully decoded on Mac", category: .media)
+                    self.decoderStatus = .success
                 }
                 self.currentFrame = cgImage
-                if !self.rendererStatus {
-                    self.rendererStatus = true
+                if self.rendererStatus == .pending {
+                    LinkOSLogger.shared.info("[PhoneSession] (PASS) Renderer updated with currentFrame", category: .media)
+                    self.rendererStatus = .success
                 }
             }
         }

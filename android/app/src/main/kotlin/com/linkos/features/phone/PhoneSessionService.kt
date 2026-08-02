@@ -55,6 +55,7 @@ class PhoneSessionService : Service() {
     private var isSendingFrame = false
     private var isPaused = false
     private var hasSentFirstEncoderStatus = false
+    private var hasReceivedFirstFrame = false
     private var windowManager: android.view.WindowManager? = null
     private var privacyOverlayView: android.view.View? = null
 
@@ -79,6 +80,7 @@ class PhoneSessionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
+        LinkOSLogger.info("[PhoneMirroring] (PASS) PhoneSessionService onStartCommand: action=$action", "PhoneMirroring")
         if (action == "START_STREAM") {
             val resultCode = intent.getIntExtra("RESULT_CODE", -1)
             val data = intent.getParcelableExtra<Intent>("DATA")
@@ -131,16 +133,19 @@ class PhoneSessionService : Service() {
         } else {
             startForeground(1042, notification)
         }
+        LinkOSLogger.info("[PhoneMirroring] (PASS) Foreground notification created and startForeground called", "PhoneMirroring")
     }
 
     private fun startCapture(resultCode: Int, data: Intent) {
         hasSentFirstEncoderStatus = false
-        LinkOSLogger.info("Starting screen capture pipeline", "PhoneMirroring")
+        hasReceivedFirstFrame = false
+        LinkOSLogger.info("[PhoneMirroring] (PASS) startCapture called inside PhoneSessionService", "PhoneMirroring")
         
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         try {
             mediaProjection = mpm.getMediaProjection(resultCode, data)
             if (mediaProjection != null) {
+                LinkOSLogger.info("[PhoneMirroring] (PASS) MediaProjection token obtained successfully from resultCode/data", "PhoneMirroring")
                 sendDiagnosticStatus("media_projection", true)
             } else {
                 sendDiagnosticStatus("media_projection", false, "MediaProjection token is null")
@@ -148,7 +153,7 @@ class PhoneSessionService : Service() {
             }
         } catch (e: Exception) {
             sendDiagnosticStatus("media_projection", false, "Failed to get MediaProjection: ${e.message}")
-            LinkOSLogger.error("Failed to get MediaProjection: ${e.message}", "PhoneMirroring")
+            LinkOSLogger.error("[PhoneMirroring] (FAIL) Failed to get MediaProjection: ${e.message}", "PhoneMirroring")
             return
         }
         
@@ -186,13 +191,14 @@ class PhoneSessionService : Service() {
             )
             
             if (virtualDisplay != null) {
+                LinkOSLogger.info("[PhoneMirroring] (PASS) VirtualDisplay created successfully: width=$targetWidth, height=$targetHeight, dpi=$dpi", "PhoneMirroring")
                 sendDiagnosticStatus("frame_capture", true)
             } else {
                 sendDiagnosticStatus("frame_capture", false, "VirtualDisplay is null")
             }
         } catch (e: Exception) {
             sendDiagnosticStatus("frame_capture", false, "Failed to build capture components: ${e.message}")
-            LinkOSLogger.error("Failed to build capture components: ${e.message}", "PhoneMirroring")
+            LinkOSLogger.error("[PhoneMirroring] (FAIL) Failed to build capture components: ${e.message}", "PhoneMirroring")
             return
         }
         
@@ -208,6 +214,10 @@ class PhoneSessionService : Service() {
             }
             
             val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+            if (!hasReceivedFirstFrame) {
+                LinkOSLogger.info("[PhoneMirroring] (PASS) ImageReader received first frame image!", "PhoneMirroring")
+                hasReceivedFirstFrame = true
+            }
             isSendingFrame = true
             
             serviceScope.launch {
@@ -231,13 +241,18 @@ class PhoneSessionService : Service() {
                     
                     if (jpegBytes != null) {
                         if (!hasSentFirstEncoderStatus) {
-                            LinkOSLogger.info("Frame #1 encoded: size=${jpegBytes.size} bytes, timestamp=${System.currentTimeMillis()}, sending...", "PhoneMirroring")
+                            LinkOSLogger.info("[PhoneMirroring] (PASS) Frame #1 successfully encoded: size=${jpegBytes.size} bytes", "PhoneMirroring")
                             sendDiagnosticStatus("encoder", true)
                             hasSentFirstEncoderStatus = true
                         }
                         webSocketClient.send(jpegBytes)
+                        if (hasSentFirstEncoderStatus && jpegBytes.size > 0 && hasReceivedFirstFrame) {
+                            // Print log only once for Frame #1
+                            LinkOSLogger.info("[PhoneMirroring] (PASS) Frame #1 sent over raw WebSocket", "PhoneMirroring")
+                        }
                     } else {
                         if (!hasSentFirstEncoderStatus) {
+                            LinkOSLogger.error("[PhoneMirroring] (FAIL) Frame encoder returned null/failed on first frame", "PhoneMirroring")
                             sendDiagnosticStatus("encoder", false, "Frame encoder returned null bytes")
                         }
                     }

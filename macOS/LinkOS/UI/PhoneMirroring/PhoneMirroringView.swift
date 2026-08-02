@@ -388,7 +388,7 @@ struct PhoneMirroringView: View {
         timeoutTimer?.invalidate()
         timeoutTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: false) { _ in
             Task { @MainActor in
-                if !PhoneSession.shared.rendererStatus {
+                if PhoneSession.shared.rendererStatus != .success {
                     PhoneSession.shared.diagnosticsTimeoutReached = true
                 }
             }
@@ -422,7 +422,7 @@ struct PhoneMirroringView: View {
 
 struct DiagnosticRow: View {
     let title: String
-    let status: Bool
+    let status: DiagnosticStageStatus
     
     var body: some View {
         HStack {
@@ -430,7 +430,16 @@ struct DiagnosticRow: View {
                 .font(.system(.body, design: .rounded))
                 .foregroundColor(.white.opacity(0.8))
             Spacer()
-            if status {
+            switch status {
+            case .pending:
+                HStack(spacing: 4) {
+                    Image(systemName: "circle")
+                        .foregroundColor(.gray)
+                    Text("Pending")
+                        .font(.system(.body, design: .rounded))
+                        .foregroundColor(.gray)
+                }
+            case .success:
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
@@ -438,13 +447,13 @@ struct DiagnosticRow: View {
                         .font(.system(.body, design: .rounded))
                         .foregroundColor(.green)
                 }
-            } else {
+            case .failure(let error):
                 HStack(spacing: 4) {
-                    Image(systemName: "circle")
-                        .foregroundColor(.gray)
-                    Text("Pending")
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.red)
+                    Text("Error: \(error)")
                         .font(.system(.body, design: .rounded))
-                        .foregroundColor(.gray)
+                        .foregroundColor(.red)
                 }
             }
         }
