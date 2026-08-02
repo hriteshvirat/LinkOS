@@ -565,6 +565,12 @@ private final class LinkOSWebSocketHandler: ChannelInboundHandler {
                 return
             }
             
+            // Fast path for raw system audio frames from Android
+            if data.count > 0 && data[0] == 0xAA {
+                await PhoneAudioService.shared.receiveAudioPacket(data)
+                return
+            }
+            
             await server.handleIncomingData(data, from: conn)
         }
         conn.onClose = { [weak self] in

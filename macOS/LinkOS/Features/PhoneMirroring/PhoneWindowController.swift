@@ -6,6 +6,8 @@ final class PhoneWindowController: NSWindowController, NSWindowDelegate {
     static let shared = PhoneWindowController()
     
     private var cancellables = Set<AnyCancellable>()
+    @Published var isPiP = false
+    private var prePipSize: NSSize = NSSize(width: 390, height: 844)
     
     private init() {
         let window = NSWindow(
@@ -24,15 +26,20 @@ final class PhoneWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         
         // Dynamic title update from PhoneSession metadata
-        PhoneSession.shared.$isStreaming
+        PhoneSession.shared.$connectionState
             .combineLatest(PhoneSession.shared.$batteryLevel, PhoneSession.shared.$latencyMs, PhoneSession.shared.$fps)
             .receive(on: DispatchQueue.main)
-            .sink { [weak window] isStreaming, battery, latency, fps in
+            .sink { [weak window] state, battery, latency, fps in
                 guard let window = window else { return }
-                if isStreaming {
-                    let deviceName = AppState.shared.activeConnectedDevice?.name ?? "Android Phone"
+                let deviceName = AppState.shared.activeConnectedDevice?.name ?? "Android Phone"
+                switch state {
+                case .connected:
                     window.title = "\(deviceName) • Connected • \(battery)% • \(Int(latency))ms • \(Int(fps)) FPS"
-                } else {
+                case .reconnecting:
+                    window.title = "\(deviceName) • Reconnecting... • \(battery)%"
+                case .connecting:
+                    window.title = "\(deviceName) • Connecting..."
+                case .disconnected:
                     window.title = "Phone"
                 }
             }
@@ -73,6 +80,22 @@ final class PhoneWindowController: NSWindowController, NSWindowDelegate {
     
     func closeMirror() {
         window?.close()
+    }
+    
+    func togglePiP() {
+        guard let window = window else { return }
+        isPiP.toggle()
+        
+        if isPiP {
+            prePipSize = window.frame.size
+            window.level = .floating
+            window.setContentSize(NSSize(width: 160, height: 346))
+            LinkOSLogger.shared.info("[PhoneWindowController] Entered PiP mode", category: .media)
+        } else {
+            window.level = .normal
+            window.setContentSize(prePipSize)
+            LinkOSLogger.shared.info("[PhoneWindowController] Exited PiP mode", category: .media)
+        }
     }
     
     // MARK: - NSWindowDelegate

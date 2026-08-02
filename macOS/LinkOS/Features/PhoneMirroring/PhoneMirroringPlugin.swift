@@ -34,8 +34,9 @@ final class PhoneMirroringPlugin: LinkOSPlugin, ConnectionStateSubscriber {
     
     func connectionDidChange(phase: ConnectionPhase, device: PeerDevice?) async {
         if phase == .disconnected {
-            // Stop phone mirroring session when disconnected
-            await PhoneSession.shared.stopSession()
+            PhoneSession.shared.setReconnecting()
+        } else if phase == .connected {
+            PhoneSession.shared.setConnected()
         }
     }
     
@@ -51,6 +52,15 @@ final class PhoneMirroringPlugin: LinkOSPlugin, ConnectionStateSubscriber {
                 }
                 if let latency = json["latency"] as? Double {
                     PhoneSession.shared.latencyMs = latency
+                }
+            } else if action == "call_state" {
+                if let state = json["state"] as? String {
+                    PhoneSession.shared.callState = state
+                    PhoneSession.shared.incomingCallNumber = json["number"] as? String ?? ""
+                    
+                    if state == "RINGING" {
+                        PhoneWindowController.shared.showMirror()
+                    }
                 }
             }
         }

@@ -3,6 +3,13 @@ import Combine
 import AppKit
 import CoreGraphics
 
+enum PhoneConnectionState {
+    case disconnected
+    case connecting
+    case connected
+    case reconnecting
+}
+
 @MainActor
 final class PhoneSession: ObservableObject {
     static let shared = PhoneSession()
@@ -13,6 +20,9 @@ final class PhoneSession: ObservableObject {
     @Published var latencyMs: Double = 0
     @Published var fps: Double = 0
     @Published var isPrivacyModeEnabled = false
+    @Published var callState: String = "IDLE"
+    @Published var incomingCallNumber: String = ""
+    @Published var connectionState: PhoneConnectionState = .disconnected
     
     private var lastFrameTime = Date()
     private var frameCount = 0
@@ -29,6 +39,20 @@ final class PhoneSession: ObservableObject {
         }
     }
     
+    func setReconnecting() {
+        guard connectionState == .connected else { return }
+        connectionState = .reconnecting
+        LinkOSLogger.shared.info("[PhoneSession] Connection standby - seeking reconnect", category: .media)
+    }
+    
+    func setConnected() {
+        connectionState = .connected
+        LinkOSLogger.shared.info("[PhoneSession] Connection established", category: .media)
+        Task {
+            await resumeSession()
+        }
+    }
+    
     // MARK: - Lifecycle Controls
     
     func startSession() async {
@@ -38,6 +62,8 @@ final class PhoneSession: ObservableObject {
         ]
         await sendControlMessage(payload)
         isStreaming = true
+        connectionState = .connected
+        await PhoneAudioService.shared.startPlayback()
     }
     
     func pauseSession() async {
@@ -46,6 +72,7 @@ final class PhoneSession: ObservableObject {
             "action": "PAUSE_STREAM"
         ]
         await sendControlMessage(payload)
+        await PhoneAudioService.shared.stopPlayback()
     }
     
     func resumeSession() async {
@@ -54,6 +81,7 @@ final class PhoneSession: ObservableObject {
             "action": "RESUME_STREAM"
         ]
         await sendControlMessage(payload)
+        await PhoneAudioService.shared.startPlayback()
     }
     
     func stopSession() async {
@@ -64,6 +92,9 @@ final class PhoneSession: ObservableObject {
         await sendControlMessage(payload)
         isStreaming = false
         currentFrame = nil
+        connectionState = .disconnected
+        await PhoneAudioService.shared.stopPlayback()
+        await PhoneAudioService.shared.stopMicCapture()
     }
     
     func togglePrivacyMode(enabled: Bool) async {
@@ -73,6 +104,40 @@ final class PhoneSession: ObservableObject {
             "enabled": enabled
         ]
         await sendControlMessage(payload)
+    }
+
+    // MARK: - Telecom Call Actions
+
+    func acceptCall() async {
+        let payload: [String: Any] = [
+            "action": "CALL_ANSWER"
+        ]
+        await sendControlMessage(payload)
+        await PhoneAudioService.shared.startMicCapture()
+    }
+    
+    func rejectCall() async {
+        let payload: [String: Any] = [
+            "action": "CALL_REJECT"
+        ]
+        await sendControlMessage(payload)
+        await PhoneAudioService.shared.stopMicCapture()
+    }
+    
+    func endCall() async {
+        let payload: [String: Any] = [
+            "action": "CALL_END"
+        ]
+        await sendControlMessage(payload)
+        await PhoneAudioService.shared.stopMicCapture()
+    }
+    
+    func transferCallToHandset() async {
+        let payload: [String: Any] = [
+            "action": "CALL_HANDOFF"
+        ]
+        await sendControlMessage(payload)
+        await PhoneAudioService.shared.stopMicCapture()
     }
     
     // MARK: - Raw Frame Processing

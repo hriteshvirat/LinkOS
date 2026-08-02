@@ -14,25 +14,149 @@ struct PhoneMirroringView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             
+            // Call Integration Overlay UI
+            if session.callState == "RINGING" {
+                VStack {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("📞 Incoming Call")
+                                .font(.system(.headline, design: .rounded))
+                                .foregroundColor(.white)
+                            Text(session.incomingCallNumber)
+                                .font(.system(.subheadline, design: .rounded))
+                                .foregroundColor(.gray)
+                        }
+                        Spacer()
+                        HStack(spacing: 12) {
+                            Button(action: {
+                                Task { await session.rejectCall() }
+                            }) {
+                                Image(systemName: "phone.down.fill")
+                                    .foregroundColor(.white)
+                                    .padding(10)
+                                    .background(Color.red)
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            
+                            Button(action: {
+                                Task { await session.acceptCall() }
+                            }) {
+                                Image(systemName: "phone.fill")
+                                    .foregroundColor(.white)
+                                    .padding(10)
+                                    .background(Color.green)
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding()
+                    .background(Color.black.opacity(0.85))
+                    .cornerRadius(18)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+                    .padding()
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.spring(response: 0.35, dampingFraction: 0.75), value: session.callState)
+                .zIndex(100)
+            } else if session.callState == "OFFHOOK" {
+                VStack {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("📞 Active Call")
+                                .font(.system(.headline, design: .rounded))
+                                .foregroundColor(.green)
+                            Text(session.incomingCallNumber)
+                                .font(.system(.subheadline, design: .rounded))
+                                .foregroundColor(.gray)
+                        }
+                        Spacer()
+                        HStack(spacing: 12) {
+                            Button(action: {
+                                Task { await session.transferCallToHandset() }
+                            }) {
+                                Image(systemName: "phone.arrow.up.right")
+                                    .foregroundColor(.white)
+                                    .padding(10)
+                                    .background(Color.blue)
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .help("Transfer Call to Phone")
+                            
+                            Button(action: {
+                                Task { await session.endCall() }
+                            }) {
+                                Image(systemName: "phone.down.fill")
+                                    .foregroundColor(.white)
+                                    .padding(10)
+                                    .background(Color.red)
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .help("Hang Up")
+                        }
+                    }
+                    .padding()
+                    .background(Color.black.opacity(0.85))
+                    .cornerRadius(18)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+                    .padding()
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.spring(response: 0.35, dampingFraction: 0.75), value: session.callState)
+                .zIndex(100)
+            }
+            
             if session.isStreaming, let frame = session.currentFrame {
-                PhoneDisplayCanvasViewRepresentable(frame: frame)
-                    .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
-                    .padding(12) // Outer Bezel spacing
-                    .shadow(color: Color.black.opacity(0.5), radius: 20, x: 0, y: 10)
-                    .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-                        for provider in providers {
-                            _ = provider.loadObject(ofClass: URL.self) { url, error in
-                                if let url = url {
-                                    Task {
-                                        if let filesPlugin = await AppState.shared.pluginManager?.getPlugin(FileSystemPlugin.self) {
-                                            try? await filesPlugin.uploadLocalFileToAndroid(filePath: url.path, targetDirectory: "/sdcard/Download")
-                                        }
+                ZStack {
+                    PhoneDisplayCanvasViewRepresentable(frame: frame)
+                        .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
+                        .padding(12) // Outer Bezel spacing
+                        .shadow(color: Color.black.opacity(0.5), radius: 20, x: 0, y: 10)
+                    
+                    if session.connectionState == .reconnecting {
+                        VisualEffectView(material: .hudWindow, blendingMode: .withinWindow)
+                            .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
+                            .padding(12)
+                            .overlay(
+                                VStack(spacing: 12) {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(1.2)
+                                    Text("Connection Lost")
+                                        .font(.system(.headline, design: .rounded))
+                                        .foregroundColor(.white)
+                                    Text("Reconnecting to phone...")
+                                        .font(.system(.subheadline, design: .rounded))
+                                        .foregroundColor(.gray)
+                                }
+                            )
+                    }
+                }
+                .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                    for provider in providers {
+                        _ = provider.loadObject(ofClass: URL.self) { url, error in
+                            if let url = url {
+                                Task {
+                                    if let filesPlugin = await AppState.shared.pluginManager?.getPlugin(FileSystemPlugin.self) {
+                                        try? await filesPlugin.uploadLocalFileToAndroid(filePath: url.path, targetDirectory: "/sdcard/Download")
                                     }
                                 }
                             }
                         }
-                        return true
                     }
+                    return true
+                }
             } else {
                 VStack(spacing: 20) {
                     ProgressView()
@@ -84,6 +208,20 @@ struct PhoneMirroringView: View {
                         .buttonStyle(PlainButtonStyle())
                         .help("Record Mirrored Session")
                         
+                        Button(action: {
+                            Task {
+                                await session.togglePrivacyMode(enabled: !session.isPrivacyModeEnabled)
+                            }
+                        }) {
+                            Image(systemName: session.isPrivacyModeEnabled ? "eye.slash.fill" : "eye.fill")
+                                .foregroundColor(session.isPrivacyModeEnabled ? .blue : .white)
+                                .padding(10)
+                                .background(Color.white.opacity(0.15))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .help(session.isPrivacyModeEnabled ? "Disable Privacy Mode (Show Screen)" : "Enable Privacy Mode (Dim Screen)")
+
                         Button(action: { disconnectSession() }) {
                             Image(systemName: "power")
                                 .foregroundColor(.white)
@@ -167,7 +305,7 @@ struct PhoneMirroringView: View {
     }
     
     private func togglePiP() {
-        // Shrink window toggle
+        PhoneWindowController.shared.togglePiP()
     }
     
     private func toggleRecording() {

@@ -125,10 +125,10 @@ final class NotificationsPlugin: NSObject, LinkOSPlugin, ConnectionStateSubscrib
         let payload: [String: Any] = [
             "action": action,
             "id": id,
-            "reply_text": text ?? ""
+            "text": text ?? ""
         ]
         if let data = try? JSONSerialization.data(withJSONObject: payload), let connectionManager {
-            let wrapped = MessageRouter.createEvent(channel: "notifications", payload: data)
+            let wrapped = MessageRouter.createEvent(channel: "notifications_action", payload: data)
             await connectionManager.broadcast(wrapped)
         }
     }

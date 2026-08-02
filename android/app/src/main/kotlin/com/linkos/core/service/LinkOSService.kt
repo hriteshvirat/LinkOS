@@ -752,6 +752,14 @@ class LinkOSService : Service(), ConnectionStateSubscriber {
                         }
                         startService(intent)
                     }
+                    "SET_PRIVACY_MODE" -> {
+                        val enabled = json.optBoolean("enabled", false)
+                        val intent = Intent(this, PhoneSessionService::class.java).apply {
+                            this.action = "SET_PRIVACY_MODE"
+                            putExtra("ENABLED", enabled)
+                        }
+                        startService(intent)
+                    }
                     "CLICK" -> {
                         val x = json.optDouble("x", 0.0).toFloat()
                         val y = json.optDouble("y", 0.0).toFloat()
@@ -790,6 +798,34 @@ class LinkOSService : Service(), ConnectionStateSubscriber {
                     }
                     "KEY_RECENTS" -> {
                         LinkOSAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
+                    }
+                    "CALL_ANSWER" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            val telecomManager = getSystemService(Context.TELECOM_SERVICE) as android.telecom.TelecomManager
+                            try {
+                                telecomManager.acceptRingingCall()
+                                LinkOSLogger.info("Incoming call answered programmatically", "PhoneMirroring")
+                            } catch (e: SecurityException) {
+                                LinkOSLogger.error("Failed to answer call due to missing permission: ${e.message}", "PhoneMirroring")
+                            }
+                        }
+                    }
+                    "CALL_REJECT", "CALL_END" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            val telecomManager = getSystemService(Context.TELECOM_SERVICE) as android.telecom.TelecomManager
+                            try {
+                                telecomManager.endCall()
+                                LinkOSLogger.info("Call ended programmatically", "PhoneMirroring")
+                            } catch (e: SecurityException) {
+                                LinkOSLogger.error("Failed to end call due to missing permission: ${e.message}", "PhoneMirroring")
+                            }
+                        }
+                    }
+                    "CALL_HANDOFF" -> {
+                        val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                        audioManager.isSpeakerphoneOn = false
+                        audioManager.mode = android.media.AudioManager.MODE_NORMAL
+                        LinkOSLogger.info("Call transferred back to physical phone handset", "PhoneMirroring")
                     }
                     "CLIPBOARD_PASTE_IMAGE" -> {
                         val base64 = json.optString("image_base64", "")
