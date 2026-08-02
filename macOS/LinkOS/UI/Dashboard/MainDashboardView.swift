@@ -134,6 +134,8 @@ struct MainDashboardView: View {
                                 dashboardPane
                             case "Devices":
                                 devicesPane
+                            case "Phone":
+                                phonePane
                             case "Remote Desktop":
                                 remoteDesktopPane
                             case "Trackpad & Keyboard":
@@ -249,6 +251,9 @@ struct MainDashboardView: View {
                     SidebarSection(title: "WORKSPACE") {
                         SidebarRow(title: "Devices", icon: "laptopcomputer.and.iphone", isSelected: selectedSidebarItem == "Devices") {
                             selectedSidebarItem = "Devices"
+                        }
+                        SidebarRow(title: "Phone", icon: "iphone", isSelected: selectedSidebarItem == "Phone") {
+                            selectedSidebarItem = "Phone"
                         }
                         SidebarRow(title: "Remote Desktop", icon: "desktopcomputer", isSelected: selectedSidebarItem == "Remote Desktop") {
                             selectedSidebarItem = "Remote Desktop"
@@ -442,6 +447,64 @@ struct MainDashboardView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
+    }
+    
+    private var phonePane: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            
+            if appState.isConnected {
+                Image(systemName: "iphone.radiowaves.left.and.right")
+                    .font(.system(size: 64))
+                    .foregroundColor(Color(hex: "3B82F6"))
+                    .shadow(color: Color(hex: "3B82F6").opacity(0.3), radius: 10)
+                
+                Text("Phone Mirroring Active")
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+                
+                Text("The live screen of your Android device is mirrored in a floating window.")
+                    .font(.system(size: 13, design: .rounded))
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+                
+                Button(action: {
+                    PhoneWindowController.shared.showMirror()
+                }) {
+                    Text("Bring Window to Front")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 10)
+                        .background(Color(hex: "3B82F6"))
+                        .cornerRadius(8)
+                }
+                .buttonStyle(PlainButtonStyle())
+            } else {
+                Image(systemName: "iphone.slash")
+                    .font(.system(size: 64))
+                    .foregroundColor(.gray)
+                
+                Text("Waiting for Android device...")
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+                
+                Text("Please pair and connect your Android device from the Devices tab or enter manual PIN to enable Phone Mirroring.")
+                    .font(.system(size: 13, design: .rounded))
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+            }
+            
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            if appState.isConnected {
+                PhoneWindowController.shared.showMirror()
+            }
+        }
     }
     
     // MARK: - Dashboard Content Pane (No CPU/RAM/SSD System Monitor; Battery info in Connected Card)

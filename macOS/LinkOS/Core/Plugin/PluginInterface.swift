@@ -119,7 +119,8 @@ actor PluginManager {
             TabletPlugin(),
             RemoteDesktopPlugin(connectionManager: connectionManager),
             DevModePlugin(connectionManager: connectionManager),
-            TrackpadPlugin()
+            TrackpadPlugin(),
+            await PhoneMirroringPlugin(connectionManager: connectionManager)
         ]
         
         for plugin in plugins {

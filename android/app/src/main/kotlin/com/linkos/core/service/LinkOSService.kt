@@ -30,6 +30,9 @@ import com.linkos.core.network.InviteListener
 import com.linkos.core.network.MessageChannel
 import com.linkos.core.network.WebSocketClient
 import com.linkos.R
+import android.accessibilityservice.AccessibilityService
+import com.linkos.features.phone.ScreenCapturePermissionActivity
+import com.linkos.features.phone.PhoneSessionService
 import com.linkos.features.clipboard.ClipboardHistoryItem
 import com.linkos.features.clipboard.ClipboardHistoryManager
 import com.linkos.features.clipboard.ClipboardType
@@ -715,6 +718,112 @@ class LinkOSService : Service(), ConnectionStateSubscriber {
                 }
             } catch (e: Exception) {
                 LinkOSLogger.error("Failed to route camera intent: ${e.message}", "Service")
+            }
+            return
+        }
+
+        if (channel == MessageChannel.PHONE) {
+            try {
+                val text = String(payload, Charsets.UTF_8)
+                val json = org.json.JSONObject(text)
+                val action = json.optString("action")
+                
+                when (action) {
+                    "START_STREAM" -> {
+                        serviceScope.launch(Dispatchers.Main) {
+                            ScreenCapturePermissionActivity.launch(this@LinkOSService)
+                        }
+                    }
+                    "PAUSE_STREAM" -> {
+                        val intent = Intent(this, PhoneSessionService::class.java).apply {
+                            this.action = "PAUSE_STREAM"
+                        }
+                        startService(intent)
+                    }
+                    "RESUME_STREAM" -> {
+                        val intent = Intent(this, PhoneSessionService::class.java).apply {
+                            this.action = "RESUME_STREAM"
+                        }
+                        startService(intent)
+                    }
+                    "STOP_STREAM" -> {
+                        val intent = Intent(this, PhoneSessionService::class.java).apply {
+                            this.action = "STOP_STREAM"
+                        }
+                        startService(intent)
+                    }
+                    "CLICK" -> {
+                        val x = json.optDouble("x", 0.0).toFloat()
+                        val y = json.optDouble("y", 0.0).toFloat()
+                        val metrics = resources.displayMetrics
+                        val absX = x * metrics.widthPixels
+                        val absY = y * metrics.heightPixels
+                        LinkOSAccessibilityService.instance?.injectClick(absX, absY)
+                    }
+                    "SWIPE" -> {
+                        val startX = json.optDouble("startX", 0.0).toFloat()
+                        val startY = json.optDouble("startY", 0.0).toFloat()
+                        val endX = json.optDouble("endX", 0.0).toFloat()
+                        val endY = json.optDouble("endY", 0.0).toFloat()
+                        val duration = json.optLong("duration", 300)
+                        val metrics = resources.displayMetrics
+                        val absStartX = startX * metrics.widthPixels
+                        val absStartY = startY * metrics.heightPixels
+                        val absEndX = endX * metrics.widthPixels
+                        val absEndY = endY * metrics.heightPixels
+                        LinkOSAccessibilityService.instance?.injectSwipe(absStartX, absStartY, absEndX, absEndY, duration)
+                    }
+                    "TEXT" -> {
+                        val textVal = json.optString("text", "")
+                        if (textVal.isNotEmpty()) {
+                            LinkOSAccessibilityService.instance?.injectText(textVal)
+                        }
+                    }
+                    "BACKSPACE" -> {
+                        LinkOSAccessibilityService.instance?.injectBackspace()
+                    }
+                    "KEY_BACK" -> {
+                        LinkOSAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+                    }
+                    "KEY_HOME" -> {
+                        LinkOSAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+                    }
+                    "KEY_RECENTS" -> {
+                        LinkOSAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
+                    }
+                    "CLIPBOARD_PASTE_IMAGE" -> {
+                        val base64 = json.optString("image_base64", "")
+                        if (base64.isNotEmpty()) {
+                            val imgBytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                            val cacheDir = File(cacheDir, "clipboard_imgs")
+                            if (!cacheDir.exists()) cacheDir.mkdirs()
+                            val file = File(cacheDir, "pasted_img_${System.currentTimeMillis()}.png")
+                            java.io.FileOutputStream(file).use { out -> out.write(imgBytes) }
+                            
+                            val contentUri = androidx.core.content.FileProvider.getUriForFile(
+                                this@LinkOSService,
+                                "${packageName}.provider",
+                                file
+                            )
+                            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clip = ClipData.newUri(contentResolver, "Clipboard Image", contentUri)
+                            clipboard.setPrimaryClip(clip)
+                            LinkOSLogger.info("Clipboard image pasted dynamically", "PhoneMirroring")
+                        }
+                    }
+                    "LAUNCH_APP" -> {
+                        val packageName = json.optString("package_name", "")
+                        if (packageName.isNotEmpty()) {
+                            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+                            if (launchIntent != null) {
+                                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                startActivity(launchIntent)
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                LinkOSLogger.error("Failed to parse phone control payload: ${e.message}", "PhoneMirroring")
             }
             return
         }

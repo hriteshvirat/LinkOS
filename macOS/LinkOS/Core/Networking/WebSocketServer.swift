@@ -20,6 +20,10 @@ final class WebSocketServer {
     private var cancellables = Set<AnyCancellable>()
     private var isCurrentlyListening = false
     
+    public var activeConnectedDeviceConnection: WebSocketConnection? {
+        return connections.values.first { !$0.isInput }
+    }
+    
     let port: Int
     
     init(port: Int = 52637) {
@@ -552,6 +556,15 @@ private final class LinkOSWebSocketHandler: ChannelInboundHandler {
         let conn = WebSocketConnection(channel: context.channel, isInput: self.isInputChannel)
         conn.onMessage = { [weak self] data in
             guard let self = self, let server = self.server else { return }
+            
+            // Fast path for raw JPEG mirroring display frames from Android
+            if data.count > 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+                if let mirroringPlugin = await AppState.shared.pluginManager?.getPlugin(PhoneMirroringPlugin.self) {
+                    await mirroringPlugin.handleRawStreamFrame(data)
+                }
+                return
+            }
+            
             await server.handleIncomingData(data, from: conn)
         }
         conn.onClose = { [weak self] in
