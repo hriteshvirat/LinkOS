@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import AppKit
 import CoreGraphics
+import Vision
 
 enum PhoneConnectionState {
     case disconnected
@@ -256,6 +257,42 @@ final class PhoneSession: ObservableObject {
         if let connection = await WebSocketServer.shared.activeConnectedDeviceConnection {
             let envelope = MessageRouter.createEvent(channel: "phone", payload: data)
             try? await connection.send(envelope)
+        }
+    }
+
+    // MARK: - AI Agent Screen Context API
+
+    func getPhoneContext() async -> String {
+        guard let cgImage = currentFrame else {
+            return "No active phone screen mirrored."
+        }
+        
+        return await withCheckedContinuation { continuation in
+            let request = VNRecognizeTextRequest { request, error in
+                guard error == nil, let observations = request.results as? [VNRecognizedTextObservation] else {
+                    continuation.resume(returning: "Failed to perform text recognition on phone screen.")
+                    return
+                }
+                
+                let recognizedStrings = observations.compactMap { observation in
+                    observation.topCandidates(1).first?.string
+                }
+                
+                let fullText = recognizedStrings.joined(separator: "\n")
+                if fullText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    continuation.resume(returning: "No visible text detected on phone screen.")
+                } else {
+                    continuation.resume(returning: fullText)
+                }
+            }
+            
+            request.recognitionLevel = .accurate
+            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+            do {
+                try handler.perform([request])
+            } catch {
+                continuation.resume(returning: "Failed to perform text recognition: \(error.localizedDescription)")
+            }
         }
     }
 }
