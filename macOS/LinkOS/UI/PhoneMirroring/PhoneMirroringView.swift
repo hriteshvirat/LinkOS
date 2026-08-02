@@ -7,6 +7,7 @@ struct PhoneMirroringView: View {
     @State private var showControlsOverlay = false
     @State private var showNavigationOverlay = false
     @State private var timeoutTimer: Timer? = nil
+    @State private var showDevDiagnostics = false
     
     // Configurable navigation overlay modes: "Always Show", "Auto-hide", "Disabled"
     @AppStorage("phone_navigation_overlay_mode") private var navMode = "Auto-hide"
@@ -160,10 +161,24 @@ struct PhoneMirroringView: View {
                 }
             } else if session.diagnosticsTimeoutReached {
                 VStack(spacing: 24) {
+                    HStack {
+                        Spacer()
+                        Button(action: {
+                            session.diagnosticsTimeoutReached = false
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title2)
+                                .foregroundColor(.white.opacity(0.6))
+                                .padding()
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 10)
+                    
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 40))
                         .foregroundColor(.orange)
-                        .padding(.top, 20)
                     
                     Text("Connection Timeout")
                         .font(.system(.title2, design: .rounded))
@@ -251,6 +266,52 @@ struct PhoneMirroringView: View {
                 }
             }
             
+            // Developer Diagnostics Panel Overlay
+            if showDevDiagnostics {
+                VStack {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("🛠 Developer Diagnostics")
+                                .font(.system(.subheadline, design: .rounded))
+                                .fontWeight(.bold)
+                                .foregroundColor(.green)
+                            Spacer()
+                            Button(action: { showDevDiagnostics = false }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                        
+                        Divider().background(Color.white.opacity(0.1))
+                        
+                        Group {
+                            DevDiagnosticRow(title: "WebSocket Connection", status: session.connectionStatus)
+                            DevDiagnosticRow(title: "MediaProjection Permission", status: session.mediaProjectionStatus)
+                            DevDiagnosticRow(title: "VirtualDisplay Capture", status: session.frameCaptureStatus)
+                            DevDiagnosticRow(title: "Android Frame Encoder", status: session.encoderStatus)
+                            DevDiagnosticRow(title: "Network Transmission", status: session.networkStatus)
+                            DevDiagnosticRow(title: "Mac Frame Decoder", status: session.decoderStatus)
+                            DevDiagnosticRow(title: "Mac Canvas Renderer", status: session.rendererStatus)
+                        }
+                    }
+                    .padding(12)
+                    .background(Color.black.opacity(0.85))
+                    .cornerRadius(16)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    )
+                    .frame(width: 280)
+                    .padding(.top, session.callState == "RINGING" ? 120 : 40)
+                    .shadow(radius: 15)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showDevDiagnostics)
+                .zIndex(90)
+            }
+            
             // Hover Overlay Control Panel (Screenshot, PiP, Record, Disconnect)
             VStack {
                 Spacer()
@@ -299,6 +360,16 @@ struct PhoneMirroringView: View {
                         }
                         .buttonStyle(PlainButtonStyle())
                         .help(session.isPrivacyModeEnabled ? "Disable Privacy Mode (Show Screen)" : "Enable Privacy Mode (Dim Screen)")
+
+                        Button(action: { showDevDiagnostics.toggle() }) {
+                            Image(systemName: "ladybug.fill")
+                                .foregroundColor(showDevDiagnostics ? .green : .white)
+                                .padding(10)
+                                .background(Color.white.opacity(0.15))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .help("Developer Diagnostics Panel")
 
                         Button(action: { disconnectSession() }) {
                             Image(systemName: "power")
@@ -455,6 +526,50 @@ struct DiagnosticRow: View {
                         .font(.system(.body, design: .rounded))
                         .foregroundColor(.red)
                 }
+            }
+        }
+    }
+}
+
+struct DevDiagnosticRow: View {
+    let title: String
+    let status: DiagnosticStageStatus
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.9))
+            Spacer()
+            switch status {
+            case .pending:
+                HStack(spacing: 4) {
+                    Image(systemName: "circle")
+                        .font(.system(size: 10))
+                        .foregroundColor(.gray)
+                    Text("Pending")
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundColor(.gray)
+                }
+            case .success:
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundColor(.green)
+                    Text("Success")
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundColor(.green)
+                }
+            case .failure(let error):
+                HStack(spacing: 4) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundColor(.red)
+                    Text("Error")
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundColor(.red)
+                }
+                .help(error)
             }
         }
     }

@@ -145,15 +145,24 @@ class PhoneSessionService : Service() {
         try {
             mediaProjection = mpm.getMediaProjection(resultCode, data)
             if (mediaProjection != null) {
-                LinkOSLogger.info("[PhoneMirroring] (PASS) MediaProjection token obtained successfully from resultCode/data", "PhoneMirroring")
+                // Android 14+ mandate: register callback before creating virtual display / capture session
+                mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+                    override fun onStop() {
+                        LinkOSLogger.info("[PhoneMirroring] MediaProjection callback: onStop() triggered", "PhoneMirroring")
+                        serviceScope.launch(Dispatchers.Main) {
+                            stopCapture()
+                        }
+                    }
+                }, backgroundHandler)
+                LinkOSLogger.info("[PhoneMirroring] (PASS) MediaProjection token obtained and callback registered successfully", "PhoneMirroring")
                 sendDiagnosticStatus("media_projection", true)
             } else {
                 sendDiagnosticStatus("media_projection", false, "MediaProjection token is null")
                 return
             }
         } catch (e: Exception) {
-            sendDiagnosticStatus("media_projection", false, "Failed to get MediaProjection: ${e.message}")
-            LinkOSLogger.error("[PhoneMirroring] (FAIL) Failed to get MediaProjection: ${e.message}", "PhoneMirroring")
+            sendDiagnosticStatus("media_projection", false, "Failed to get MediaProjection or register callback: ${e.message}")
+            LinkOSLogger.error("[PhoneMirroring] (FAIL) Failed to get MediaProjection or register callback: ${e.message}", "PhoneMirroring")
             return
         }
         
