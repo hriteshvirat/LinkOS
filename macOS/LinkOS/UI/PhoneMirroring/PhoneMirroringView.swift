@@ -6,6 +6,7 @@ struct PhoneMirroringView: View {
     @StateObject private var session = PhoneSession.shared
     @State private var showControlsOverlay = false
     @State private var showNavigationOverlay = false
+    @State private var timeoutTimer: Timer? = nil
     
     // Configurable navigation overlay modes: "Always Show", "Auto-hide", "Disabled"
     @AppStorage("phone_navigation_overlay_mode") private var navMode = "Auto-hide"
@@ -157,6 +158,83 @@ struct PhoneMirroringView: View {
                     }
                     return true
                 }
+            } else if session.diagnosticsTimeoutReached {
+                VStack(spacing: 24) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 40))
+                        .foregroundColor(.orange)
+                        .padding(.top, 20)
+                    
+                    Text("Connection Timeout")
+                        .font(.system(.title2, design: .rounded))
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                    
+                    Text("The screen mirroring stream took too long to start. Here is the diagnostic status of the connection pipeline:")
+                        .font(.system(.body, design: .rounded))
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                    
+                    // Pipeline Status List
+                    VStack(alignment: .leading, spacing: 12) {
+                        DiagnosticRow(title: "1. Connection (WebSocket)", status: session.connectionStatus)
+                        DiagnosticRow(title: "2. MediaProjection Permission", status: session.mediaProjectionStatus)
+                        DiagnosticRow(title: "3. Frame Capture (VirtualDisplay)", status: session.frameCaptureStatus)
+                        DiagnosticRow(title: "4. Frame Encoder (Android)", status: session.encoderStatus)
+                        DiagnosticRow(title: "5. Network Transmission", status: session.networkStatus)
+                        DiagnosticRow(title: "6. Frame Decoder (Mac)", status: session.decoderStatus)
+                        DiagnosticRow(title: "7. Renderer (Canvas)", status: session.rendererStatus)
+                    }
+                    .padding()
+                    .background(Color.white.opacity(0.05))
+                    .cornerRadius(12)
+                    .padding(.horizontal, 24)
+                    
+                    if !session.lastErrorMessage.isEmpty {
+                        Text("Error: \(session.lastErrorMessage)")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.red)
+                            .padding(.horizontal, 24)
+                            .multilineTextAlignment(.center)
+                    }
+                    
+                    HStack(spacing: 16) {
+                        Button(action: {
+                            session.resetDiagnostics()
+                            startDiagnosticsTimer()
+                            Task {
+                                await session.startSession()
+                            }
+                        }) {
+                            Text("Retry")
+                                .fontWeight(.semibold)
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 8)
+                                .background(Color.white)
+                                .cornerRadius(8)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        
+                        Button(action: {
+                            let url = URL(string: "https://github.com/hriteshvirat/LinkOS/blob/main/docs/Troubleshooting.md")!
+                            NSWorkspace.shared.open(url)
+                        }) {
+                            Text("Troubleshoot")
+                                .fontWeight(.semibold)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 8)
+                                .background(Color.white.opacity(0.15))
+                                .cornerRadius(8)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    .padding(.bottom, 20)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black.opacity(0.9))
             } else {
                 VStack(spacing: 20) {
                     ProgressView()
@@ -287,6 +365,12 @@ struct PhoneMirroringView: View {
                 }
             }
         }
+        .onAppear {
+            startDiagnosticsTimer()
+        }
+        .onDisappear {
+            stopDiagnosticsTimer()
+        }
     }
     
     private var shouldShowNavigationOverlay: Bool {
@@ -299,6 +383,22 @@ struct PhoneMirroringView: View {
     }
     
     // MARK: - Actions Triggers
+    
+    private func startDiagnosticsTimer() {
+        timeoutTimer?.invalidate()
+        timeoutTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: false) { _ in
+            Task { @MainActor in
+                if !PhoneSession.shared.rendererStatus {
+                    PhoneSession.shared.diagnosticsTimeoutReached = true
+                }
+            }
+        }
+    }
+    
+    private func stopDiagnosticsTimer() {
+        timeoutTimer?.invalidate()
+        timeoutTimer = nil
+    }
     
     private func triggerScreenshot() {
         // Screenshots trigger handled locally or requested from Android
@@ -316,6 +416,37 @@ struct PhoneMirroringView: View {
         Task {
             await session.stopSession()
             PhoneWindowController.shared.closeMirror()
+        }
+    }
+}
+
+struct DiagnosticRow: View {
+    let title: String
+    let status: Bool
+    
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.system(.body, design: .rounded))
+                .foregroundColor(.white.opacity(0.8))
+            Spacer()
+            if status {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("Success")
+                        .font(.system(.body, design: .rounded))
+                        .foregroundColor(.green)
+                }
+            } else {
+                HStack(spacing: 4) {
+                    Image(systemName: "circle")
+                        .foregroundColor(.gray)
+                    Text("Pending")
+                        .font(.system(.body, design: .rounded))
+                        .foregroundColor(.gray)
+                }
+            }
         }
     }
 }

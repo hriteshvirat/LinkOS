@@ -53,6 +53,12 @@ final class PhoneMirroringPlugin: LinkOSPlugin, ConnectionStateSubscriber {
                 if let latency = json["latency"] as? Double {
                     PhoneSession.shared.latencyMs = latency
                 }
+            } else if action == "diagnostic_status" {
+                if let stage = json["stage"] as? String,
+                   let ok = json["ok"] as? Bool {
+                    let error = json["error"] as? String ?? ""
+                    PhoneSession.shared.updateDiagnostic(stage: stage, ok: ok, error: error)
+                }
             } else if action == "call_state" {
                 if let state = json["state"] as? String {
                     PhoneSession.shared.callState = state

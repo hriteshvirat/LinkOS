@@ -54,6 +54,7 @@ class PhoneSessionService : Service() {
     @Volatile
     private var isSendingFrame = false
     private var isPaused = false
+    private var hasSentFirstEncoderStatus = false
     private var windowManager: android.view.WindowManager? = null
     private var privacyOverlayView: android.view.View? = null
 
@@ -133,8 +134,23 @@ class PhoneSessionService : Service() {
     }
 
     private fun startCapture(resultCode: Int, data: Intent) {
+        hasSentFirstEncoderStatus = false
+        LinkOSLogger.info("Starting screen capture pipeline", "PhoneMirroring")
+        
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        mediaProjection = mpm.getMediaProjection(resultCode, data)
+        try {
+            mediaProjection = mpm.getMediaProjection(resultCode, data)
+            if (mediaProjection != null) {
+                sendDiagnosticStatus("media_projection", true)
+            } else {
+                sendDiagnosticStatus("media_projection", false, "MediaProjection token is null")
+                return
+            }
+        } catch (e: Exception) {
+            sendDiagnosticStatus("media_projection", false, "Failed to get MediaProjection: ${e.message}")
+            LinkOSLogger.error("Failed to get MediaProjection: ${e.message}", "PhoneMirroring")
+            return
+        }
         
         val metrics = resources.displayMetrics
         val width = metrics.widthPixels
@@ -155,18 +171,30 @@ class PhoneSessionService : Service() {
             }
         }
         
-        imageReader = ImageReader.newInstance(targetWidth, targetHeight, PixelFormat.RGBA_8888, 2)
-        
-        virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "PhoneMirroringDisplay",
-            targetWidth,
-            targetHeight,
-            dpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface,
-            null,
-            backgroundHandler
-        )
+        try {
+            imageReader = ImageReader.newInstance(targetWidth, targetHeight, PixelFormat.RGBA_8888, 2)
+            
+            virtualDisplay = mediaProjection?.createVirtualDisplay(
+                "PhoneMirroringDisplay",
+                targetWidth,
+                targetHeight,
+                dpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader?.surface,
+                null,
+                backgroundHandler
+            )
+            
+            if (virtualDisplay != null) {
+                sendDiagnosticStatus("frame_capture", true)
+            } else {
+                sendDiagnosticStatus("frame_capture", false, "VirtualDisplay is null")
+            }
+        } catch (e: Exception) {
+            sendDiagnosticStatus("frame_capture", false, "Failed to build capture components: ${e.message}")
+            LinkOSLogger.error("Failed to build capture components: ${e.message}", "PhoneMirroring")
+            return
+        }
         
         imageReader?.setOnImageAvailableListener({ reader ->
             if (isPaused) {
@@ -202,7 +230,16 @@ class PhoneSessionService : Service() {
                     val jpegBytes = frameEncoder.encode(croppedBitmap)
                     
                     if (jpegBytes != null) {
+                        if (!hasSentFirstEncoderStatus) {
+                            LinkOSLogger.info("Frame #1 encoded: size=${jpegBytes.size} bytes, timestamp=${System.currentTimeMillis()}, sending...", "PhoneMirroring")
+                            sendDiagnosticStatus("encoder", true)
+                            hasSentFirstEncoderStatus = true
+                        }
                         webSocketClient.send(jpegBytes)
+                    } else {
+                        if (!hasSentFirstEncoderStatus) {
+                            sendDiagnosticStatus("encoder", false, "Frame encoder returned null bytes")
+                        }
                     }
                 } catch (e: Exception) {
                     LinkOSLogger.error("Failed to process phone mirror frame: ${e.message}", "PhoneMirroring")
@@ -401,6 +438,25 @@ class PhoneSessionService : Service() {
             } catch (e: Exception) {
                 LinkOSLogger.error("Failed to update Privacy Mode overlay: ${e.message}", "PhoneMirroring")
             }
+        }
+    }
+
+    private fun sendDiagnosticStatus(stage: String, ok: Boolean, error: String? = null) {
+        try {
+            val payload = org.json.JSONObject().apply {
+                put("action", "diagnostic_status")
+                put("stage", stage)
+                put("ok", ok)
+                if (error != null) {
+                    put("error", error)
+                }
+            }
+            serviceScope.launch {
+                webSocketClient.sendEnvelope("phone", payload.toString(), type = "event")
+            }
+            LinkOSLogger.info("Diagnostic status updated: stage=$stage, ok=$ok, error=$error", "PhoneMirroring")
+        } catch (e: Exception) {
+            LinkOSLogger.error("Failed to send diagnostic status: ${e.message}", "PhoneMirroring")
         }
     }
 

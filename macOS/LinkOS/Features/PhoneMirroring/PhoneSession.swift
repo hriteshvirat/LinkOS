@@ -25,6 +25,17 @@ final class PhoneSession: ObservableObject {
     @Published var incomingCallNumber: String = ""
     @Published var connectionState: PhoneConnectionState = .disconnected
     
+    // Diagnostics State
+    @Published var connectionStatus: Bool = false
+    @Published var mediaProjectionStatus: Bool = false
+    @Published var frameCaptureStatus: Bool = false
+    @Published var encoderStatus: Bool = false
+    @Published var networkStatus: Bool = false
+    @Published var decoderStatus: Bool = false
+    @Published var rendererStatus: Bool = false
+    @Published var diagnosticsTimeoutReached: Bool = false
+    @Published var lastErrorMessage: String = ""
+    
     private var lastFrameTime = Date()
     private var frameCount = 0
     private var fpsTimer: Timer?
@@ -54,10 +65,42 @@ final class PhoneSession: ObservableObject {
         }
     }
     
+    func resetDiagnostics() {
+        connectionStatus = (connectionState == .connected)
+        mediaProjectionStatus = false
+        frameCaptureStatus = false
+        encoderStatus = false
+        networkStatus = false
+        decoderStatus = false
+        rendererStatus = false
+        diagnosticsTimeoutReached = false
+        lastErrorMessage = ""
+    }
+    
+    func updateDiagnostic(stage: String, ok: Bool, error: String) {
+        switch stage {
+        case "media_projection":
+            mediaProjectionStatus = ok
+        case "frame_capture":
+            frameCaptureStatus = ok
+        case "encoder":
+            encoderStatus = ok
+        default:
+            break
+        }
+        if !ok {
+            lastErrorMessage = error
+            LinkOSLogger.shared.error("[PhoneSession] Stage \(stage) failed: \(error)", category: .media)
+        } else {
+            LinkOSLogger.shared.info("[PhoneSession] Stage \(stage) completed successfully", category: .media)
+        }
+    }
+    
     // MARK: - Lifecycle Controls
     
     func startSession() async {
         LinkOSLogger.shared.info("[PhoneSession] Starting Phone Mirroring session", category: .media)
+        resetDiagnostics()
         let payload: [String: Any] = [
             "action": "START_STREAM"
         ]
@@ -153,6 +196,13 @@ final class PhoneSession: ObservableObject {
         let calcLatency = interval * 1000.0
         self.latencyMs = (self.latencyMs * 0.9) + (calcLatency * 0.1) // Smooth latency jitter
         
+        // Mark network connection payload received
+        if !networkStatus {
+            DispatchQueue.main.async {
+                self.networkStatus = true
+            }
+        }
+        
         // Decode JPEG frame asynchronously on background queue
         DispatchQueue.global(qos: .userInteractive).async {
             guard let cgDataProvider = CGDataProvider(data: data as CFData),
@@ -166,7 +216,13 @@ final class PhoneSession: ObservableObject {
             }
             
             DispatchQueue.main.async {
+                if !self.decoderStatus {
+                    self.decoderStatus = true
+                }
                 self.currentFrame = cgImage
+                if !self.rendererStatus {
+                    self.rendererStatus = true
+                }
             }
         }
     }
