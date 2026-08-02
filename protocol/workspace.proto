@@ -1,0 +1,262 @@
+// LinkOS Workspace Protocol
+// Handles smart workspace profiles and media controls.
+
+syntax = "proto3";
+package linkos.workspace;
+
+option java_package = "com.linkos.core.protocol.generated";
+option java_multiple_files = true;
+option swift_prefix = "LOS";
+
+// ============================================================
+// Smart Workspace
+// ============================================================
+
+message WorkspaceProfile {
+  string workspace_id = 1;
+  string name = 2;
+  string description = 3;
+  string icon_name = 4;          // SF Symbol name
+  string color = 5;              // Hex accent color
+  uint64 created_at = 6;
+  uint64 last_used = 7;
+  
+  // What this workspace launches
+  repeated WorkspaceApp apps = 8;
+  repeated WorkspaceFile files = 9;
+  repeated WorkspaceURL urls = 10;
+  repeated WorkspaceTerminal terminals = 11;
+  WorkspaceDocker docker = 12;
+  WorkspaceAudio audio = 13;
+  WorkspaceFocus focus = 14;
+}
+
+message WorkspaceApp {
+  string bundle_id = 1;
+  string name = 2;
+  repeated string arguments = 3;
+}
+
+message WorkspaceFile {
+  string path = 1;
+  string app_bundle_id = 2;     // Open with specific app
+}
+
+message WorkspaceURL {
+  string url = 1;
+  string browser_bundle_id = 2; // Optional specific browser
+}
+
+message WorkspaceTerminal {
+  string command = 1;
+  string working_directory = 2;
+  string label = 3;
+}
+
+message WorkspaceDocker {
+  repeated string container_names = 1;
+  string compose_file = 2;
+}
+
+message WorkspaceAudio {
+  string playlist_url = 1;     // Spotify/Apple Music link
+  uint32 volume_percent = 2;
+}
+
+message WorkspaceFocus {
+  bool enable_dnd = 1;         // Do Not Disturb
+  string focus_mode = 2;       // macOS Focus mode name
+}
+
+// ============================================================
+// Workspace Management
+// ============================================================
+
+message WorkspaceListRequest {}
+
+message WorkspaceListResponse {
+  repeated WorkspaceProfile workspaces = 1;
+}
+
+message WorkspaceLaunchRequest {
+  string workspace_id = 1;
+}
+
+message WorkspaceLaunchResponse {
+  bool success = 1;
+  repeated WorkspaceLaunchResult results = 2;
+}
+
+message WorkspaceLaunchResult {
+  string item_name = 1;
+  bool success = 2;
+  string error_message = 3;
+}
+
+message WorkspaceSaveRequest {
+  WorkspaceProfile workspace = 1;
+}
+
+message WorkspaceDeleteRequest {
+  string workspace_id = 1;
+}
+
+// ============================================================
+// Media Controls
+// ============================================================
+
+message MediaStateRequest {}
+
+message MediaState {
+  string app_name = 1;
+  string app_bundle_id = 2;
+  string title = 3;
+  string artist = 4;
+  string album = 5;
+  uint64 duration_ms = 6;
+  uint64 position_ms = 7;
+  MediaPlaybackState state = 8;
+  double volume = 9;            // 0.0 to 1.0
+  bool has_artwork = 10;
+  bytes artwork_data = 11;     // Small JPEG artwork
+  bool shuffle = 12;
+  MediaRepeatMode repeat_mode = 13;
+}
+
+enum MediaPlaybackState {
+  MEDIA_PLAYBACK_UNSPECIFIED = 0;
+  PLAYING = 1;
+  PAUSED = 2;
+  STOPPED = 3;
+}
+
+enum MediaRepeatMode {
+  MEDIA_REPEAT_UNSPECIFIED = 0;
+  REPEAT_OFF = 1;
+  REPEAT_ONE = 2;
+  REPEAT_ALL = 3;
+}
+
+message MediaControlAction {
+  MediaAction action = 1;
+  double value = 2;            // For SEEK (position 0-1), VOLUME (0-1)
+}
+
+enum MediaAction {
+  MEDIA_ACTION_UNSPECIFIED = 0;
+  PLAY = 1;
+  PAUSE = 2;
+  TOGGLE_PLAY_PAUSE = 3;
+  NEXT = 4;
+  PREVIOUS = 5;
+  SEEK = 6;
+  SET_VOLUME = 7;
+  TOGGLE_SHUFFLE = 8;
+  CYCLE_REPEAT = 9;
+}
+
+// ============================================================
+// Developer Mode
+// ============================================================
+
+message DevModeRequest {
+  DevModeSection section = 1;
+}
+
+enum DevModeSection {
+  DEV_MODE_SECTION_UNSPECIFIED = 0;
+  GIT = 1;
+  DOCKER = 2;
+  CI_BUILDS = 3;
+  PROCESSES = 4;
+  PORTS = 5;
+  LOGS = 6;
+  CRASHES = 7;
+}
+
+// Git
+message GitStatus {
+  string repo_path = 1;
+  string branch = 2;
+  string remote = 3;
+  uint32 ahead = 4;
+  uint32 behind = 5;
+  repeated GitFileChange changes = 6;
+  string last_commit_hash = 7;
+  string last_commit_message = 8;
+  uint64 last_commit_timestamp = 9;
+}
+
+message GitFileChange {
+  string path = 1;
+  GitChangeType change_type = 2;
+}
+
+enum GitChangeType {
+  GIT_CHANGE_UNSPECIFIED = 0;
+  MODIFIED = 1;
+  ADDED = 2;
+  DELETED = 3;
+  RENAMED = 4;
+  UNTRACKED = 5;
+}
+
+// Docker
+message DockerStatus {
+  repeated DockerContainer containers = 1;
+}
+
+message DockerContainer {
+  string id = 1;
+  string name = 2;
+  string image = 3;
+  string status = 4;
+  DockerContainerState state = 5;
+  repeated DockerPort ports = 6;
+  uint64 created_at = 7;
+}
+
+enum DockerContainerState {
+  DOCKER_STATE_UNSPECIFIED = 0;
+  DOCKER_RUNNING = 1;
+  DOCKER_STOPPED = 2;
+  DOCKER_PAUSED = 3;
+  DOCKER_RESTARTING = 4;
+}
+
+message DockerPort {
+  uint32 private_port = 1;
+  uint32 public_port = 2;
+  string protocol = 3;
+}
+
+message DockerAction {
+  string container_id = 1;
+  DockerActionType action = 2;
+}
+
+enum DockerActionType {
+  DOCKER_ACTION_UNSPECIFIED = 0;
+  START = 1;
+  STOP = 2;
+  RESTART = 3;
+  REMOVE = 4;
+  VIEW_LOGS = 5;
+}
+
+// Port Monitoring
+message PortListRequest {}
+
+message PortListResponse {
+  repeated PortInfo ports = 1;
+}
+
+message PortInfo {
+  uint32 port = 1;
+  string protocol = 2;         // "tcp" or "udp"
+  string process_name = 3;
+  int32 pid = 4;
+  string state = 5;            // "LISTEN", "ESTABLISHED", etc.
+  string local_address = 6;
+  string remote_address = 7;
+}

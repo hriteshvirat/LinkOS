@@ -1,0 +1,168 @@
+// LinkOS Core Protocol
+// All messages between macOS and Android flow through this envelope.
+// Platform-agnostic. Designed for forward compatibility.
+
+syntax = "proto3";
+package linkos;
+
+option java_package = "com.linkos.core.protocol.generated";
+option java_multiple_files = true;
+option swift_prefix = "LOS";
+
+// ============================================================
+// Core Message Envelope
+// ============================================================
+
+// Every message sent between devices uses this envelope.
+// The `payload` field contains channel-specific protobuf bytes.
+message LinkOSMessage {
+  // Unique message identifier (UUID v4)
+  string message_id = 1;
+
+  // Message classification
+  MessageType type = 2;
+
+  // Routing channel (e.g., "clipboard", "input", "media")
+  string channel = 3;
+
+  // Unix timestamp in milliseconds
+  uint64 timestamp = 4;
+
+  // Channel-specific protobuf payload (serialized inner message)
+  bytes payload = 5;
+
+  // HMAC-SHA256 for message integrity verification
+  bytes signature = 6;
+
+  // Optional: correlation ID for request-response pairing
+  string correlation_id = 7;
+
+  // Protocol version for backward compatibility
+  uint32 protocol_version = 8;
+
+  // Sender device identifier
+  string device_id = 9;
+}
+
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  REQUEST = 1;
+  RESPONSE = 2;
+  EVENT = 3;
+  STREAM = 4;
+  ACK = 5;
+  ERROR = 6;
+  PING = 7;
+  PONG = 8;
+}
+
+// ============================================================
+// Error Handling
+// ============================================================
+
+message ErrorPayload {
+  uint32 code = 1;
+  string message = 2;
+  string details = 3;
+  bool retryable = 4;
+}
+
+// Standard error codes
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  UNAUTHORIZED = 1;
+  PERMISSION_DENIED = 2;
+  NOT_FOUND = 3;
+  TIMEOUT = 4;
+  RATE_LIMITED = 5;
+  INTERNAL_ERROR = 6;
+  UNSUPPORTED_VERSION = 7;
+  DEVICE_NOT_PAIRED = 8;
+  ENCRYPTION_FAILED = 9;
+  INVALID_PAYLOAD = 10;
+}
+
+// ============================================================
+// Device Information
+// ============================================================
+
+message DeviceInfo {
+  string device_id = 1;
+  string device_name = 2;
+  DeviceType device_type = 3;
+  string os_version = 4;
+  string app_version = 5;
+  uint32 protocol_version = 6;
+  repeated string supported_channels = 7;
+  DeviceCapabilities capabilities = 8;
+}
+
+enum DeviceType {
+  DEVICE_TYPE_UNSPECIFIED = 0;
+  MACOS = 1;
+  ANDROID_PHONE = 2;
+  ANDROID_TABLET = 3;
+  WINDOWS = 4;   // Future
+  LINUX = 5;     // Future
+}
+
+message DeviceCapabilities {
+  bool supports_screen_capture = 1;
+  bool supports_input_injection = 2;
+  bool supports_clipboard = 3;
+  bool supports_file_transfer = 4;
+  bool supports_terminal = 5;
+  bool supports_notifications = 6;
+  bool supports_media_control = 7;
+  bool supports_ble = 8;
+  bool supports_nfc = 9;
+  bool supports_camera = 10;
+  bool supports_biometrics = 11;
+  bool supports_stylus = 12;
+  bool supports_second_display = 13;
+  // Extension point for future capabilities
+  map<string, bool> extended_capabilities = 14;
+}
+
+// ============================================================
+// Connection Lifecycle
+// ============================================================
+
+message Heartbeat {
+  uint64 timestamp = 1;
+  uint32 rtt_ms = 2;
+  ConnectionQuality quality = 3;
+}
+
+enum ConnectionQuality {
+  CONNECTION_QUALITY_UNSPECIFIED = 0;
+  EXCELLENT = 1;
+  GOOD = 2;
+  FAIR = 3;
+  POOR = 4;
+  DISCONNECTED = 5;
+}
+
+// ============================================================
+// Channel Registration
+// ============================================================
+
+// Sent after connection to declare which channels this device handles
+message ChannelManifest {
+  repeated ChannelInfo channels = 1;
+}
+
+message ChannelInfo {
+  string channel_id = 1;
+  string display_name = 2;
+  bool requires_permission = 3;
+  ChannelTransport preferred_transport = 4;
+}
+
+enum ChannelTransport {
+  CHANNEL_TRANSPORT_UNSPECIFIED = 0;
+  WEBSOCKET = 1;
+  WEBRTC_DATA = 2;
+  WEBRTC_MEDIA = 3;
+  BLE = 4;
+}

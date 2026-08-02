@@ -1,0 +1,271 @@
+// LinkOS AI Protocol
+// Handles AI agent commands, workflow automation, and search.
+// Designed with pluggable provider architecture.
+
+syntax = "proto3";
+package linkos.ai;
+
+option java_package = "com.linkos.core.protocol.generated";
+option java_multiple_files = true;
+option swift_prefix = "LOS";
+
+// ============================================================
+// AI Agent — Natural Language Commands
+// ============================================================
+
+message AICommandRequest {
+  string request_id = 1;
+  string natural_language_input = 2;
+  AIProvider provider = 3;        // Which AI to use
+  AIContext context = 4;          // Current system context
+}
+
+message AICommandResponse {
+  string request_id = 1;
+  bool understood = 2;
+  string interpretation = 3;     // What the AI understood
+  repeated AIAction actions = 4; // Actions to execute
+  string explanation = 5;        // Human-readable explanation
+  AIConfidence confidence = 6;
+  bool requires_confirmation = 7;
+}
+
+message AIContext {
+  repeated string running_apps = 1;
+  string active_app = 2;
+  string active_window_title = 3;
+  string clipboard_text = 4;
+  // Extension point: future OptixPhotos integration
+  map<string, string> extension_context = 5;
+}
+
+message AIAction {
+  AIActionType type = 1;
+  map<string, string> parameters = 2;
+  uint32 order = 3;             // Execution order
+  bool optional = 4;           // Can be skipped if fails
+}
+
+enum AIActionType {
+  AI_ACTION_UNSPECIFIED = 0;
+  LAUNCH_APP = 1;
+  CLOSE_APP = 2;
+  OPEN_FILE = 3;
+  OPEN_URL = 4;
+  RUN_TERMINAL_COMMAND = 5;
+  SYSTEM_CONTROL = 6;       // Volume, brightness, sleep, shutdown
+  TAKE_SCREENSHOT = 7;
+  TYPE_TEXT = 8;
+  KEYBOARD_SHORTCUT = 9;
+  CLICK_UI_ELEMENT = 10;
+  WAIT = 11;
+  CONDITIONAL = 12;
+  // Extension point for external integrations
+  PLUGIN_ACTION = 100;
+}
+
+enum AIConfidence {
+  AI_CONFIDENCE_UNSPECIFIED = 0;
+  HIGH = 1;       // Execute without confirmation
+  MEDIUM = 2;     // Show confirmation dialog
+  LOW = 3;        // Ask for clarification
+}
+
+// ============================================================
+// AI Provider Configuration
+// ============================================================
+
+enum AIProvider {
+  AI_PROVIDER_UNSPECIFIED = 0;
+  LOCAL = 1;            // On-device CoreML / local model
+  OPENAI = 2;
+  ANTHROPIC = 3;
+  GEMINI = 4;
+  OLLAMA = 5;
+  LM_STUDIO = 6;
+  OPENROUTER = 7;
+  CUSTOM = 8;
+}
+
+message AIProviderConfig {
+  AIProvider provider = 1;
+  string api_key = 2;           // Encrypted
+  string endpoint_url = 3;     // For custom/self-hosted
+  string model_name = 4;
+  double temperature = 5;
+  uint32 max_tokens = 6;
+  map<string, string> extra_params = 7;
+}
+
+// ============================================================
+// Workflow Recorder
+// ============================================================
+
+message WorkflowRecordRequest {
+  string workflow_name = 1;
+  string description = 2;
+}
+
+message WorkflowRecordResponse {
+  string recording_id = 1;
+  bool started = 2;
+}
+
+message WorkflowRecordStop {
+  string recording_id = 1;
+}
+
+message RecordedWorkflow {
+  string workflow_id = 1;
+  string name = 2;
+  string description = 3;
+  uint64 created_at = 4;
+  uint64 updated_at = 5;
+  repeated WorkflowStep steps = 6;
+  WorkflowTrigger trigger = 7;
+  string schedule_cron = 8;      // Optional cron schedule
+}
+
+message WorkflowStep {
+  uint32 order = 1;
+  AIActionType action = 2;
+  map<string, string> parameters = 3;
+  uint32 delay_ms = 4;           // Delay before this step
+  string condition = 5;          // Optional condition expression
+  string description = 6;
+}
+
+message WorkflowTrigger {
+  WorkflowTriggerType type = 1;
+  string voice_phrase = 2;      // For voice trigger
+  string keyboard_shortcut = 3; // For keyboard trigger
+  string nfc_tag_id = 4;       // For NFC trigger
+}
+
+enum WorkflowTriggerType {
+  WORKFLOW_TRIGGER_UNSPECIFIED = 0;
+  MANUAL = 1;
+  VOICE = 2;
+  KEYBOARD_SHORTCUT = 3;
+  SCHEDULE = 4;
+  NFC_TAP = 5;
+  BLE_PROXIMITY = 6;
+  // Extension point
+  EXTERNAL_EVENT = 100;
+}
+
+// ============================================================
+// Workflow Management
+// ============================================================
+
+message WorkflowListRequest {}
+
+message WorkflowListResponse {
+  repeated RecordedWorkflow workflows = 1;
+}
+
+message WorkflowExecuteRequest {
+  string workflow_id = 1;
+  map<string, string> overrides = 2;  // Override step parameters
+}
+
+message WorkflowExecuteResponse {
+  string execution_id = 1;
+  bool started = 2;
+  string error_message = 3;
+}
+
+message WorkflowProgress {
+  string execution_id = 1;
+  uint32 current_step = 2;
+  uint32 total_steps = 3;
+  string current_step_description = 4;
+  WorkflowExecutionStatus status = 5;
+  string error_message = 6;
+}
+
+enum WorkflowExecutionStatus {
+  WORKFLOW_EXECUTION_UNSPECIFIED = 0;
+  EXECUTING = 1;
+  COMPLETED = 2;
+  FAILED = 3;
+  PAUSED = 4;
+  CANCELLED = 5;
+}
+
+// ============================================================
+// AI Search (Text/Metadata only — no image AI)
+// ============================================================
+// NOTE: OCR, image embeddings, semantic image search, and visual
+// AI pipelines are intentionally excluded. Those capabilities
+// belong to OptixPhotos and will be integrated via a shared
+// AI Engine / local API in the future.
+// Extension points are provided via the AISearchExtension message.
+
+message AISearchRequest {
+  string query = 1;
+  repeated SearchDomain domains = 2;
+  uint32 limit = 3;
+  AIProvider provider = 4;
+}
+
+enum SearchDomain {
+  SEARCH_DOMAIN_UNSPECIFIED = 0;
+  FILES = 1;
+  SPOTLIGHT = 2;
+  APPLICATIONS = 3;
+  CONTACTS = 4;
+  CALENDAR = 5;
+  CLIPBOARD_HISTORY = 6;
+  TERMINAL_HISTORY = 7;
+  // Extension point for OptixPhotos integration
+  EXTERNAL_SEARCH = 100;
+}
+
+message AISearchResponse {
+  repeated SearchResult results = 1;
+  string summary = 2;          // AI-generated summary of results
+}
+
+message SearchResult {
+  string title = 1;
+  string description = 2;
+  string path = 3;
+  SearchDomain domain = 4;
+  double relevance_score = 5;
+  map<string, string> metadata = 6;
+}
+
+// Extension point for future integrations (e.g., OptixPhotos)
+message AISearchExtension {
+  string extension_id = 1;
+  string extension_name = 2;
+  bytes extension_payload = 3;
+}
+
+// ============================================================
+// Screen Assistant
+// ============================================================
+// NOTE: Uses camera capture from Android, sends to AI for analysis.
+// This is NOT image indexing — it's real-time assistance.
+
+message ScreenAssistantRequest {
+  string request_id = 1;
+  bytes image_data = 2;         // Camera capture JPEG
+  string user_question = 3;    // Optional question about what's on screen
+  AIProvider provider = 4;
+}
+
+message ScreenAssistantResponse {
+  string request_id = 1;
+  string analysis = 2;         // What the AI sees
+  repeated Suggestion suggestions = 3;
+  string error_context = 4;    // If an error is detected
+  string resolution = 5;       // Suggested fix
+}
+
+message Suggestion {
+  string title = 1;
+  string description = 2;
+  AIAction action = 3;         // Optional executable action
+}

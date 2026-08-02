@@ -1,0 +1,91 @@
+// LinkOS Clipboard Sync Protocol
+// Handles real-time clipboard synchronization between devices.
+
+syntax = "proto3";
+package linkos.clipboard;
+
+option java_package = "com.linkos.core.protocol.generated";
+option java_multiple_files = true;
+option swift_prefix = "LOS";
+
+// ============================================================
+// Clipboard Sync
+// ============================================================
+
+// Sent when clipboard content changes
+message ClipboardUpdate {
+  string entry_id = 1;          // Unique clipboard entry ID
+  ClipboardContentType content_type = 2;
+  bytes content = 3;            // The clipboard data
+  string mime_type = 4;         // e.g., "text/plain", "image/png"
+  string source_app = 5;       // App that produced the clipboard content
+  uint64 timestamp = 6;
+  uint64 size_bytes = 7;
+  // For large content (files, large images), transfer via DataChannel
+  bool requires_data_channel = 8;
+  string data_channel_transfer_id = 9;
+}
+
+enum ClipboardContentType {
+  CLIPBOARD_CONTENT_TYPE_UNSPECIFIED = 0;
+  TEXT = 1;
+  RICH_TEXT = 2;
+  IMAGE = 3;
+  FILE_REFERENCE = 4;
+  URL = 5;
+  COLOR = 6;
+  CODE_SNIPPET = 7;
+}
+
+// ============================================================
+// Clipboard History
+// ============================================================
+
+message ClipboardHistoryRequest {
+  uint32 limit = 1;          // Max entries to return
+  uint64 before_timestamp = 2;  // Pagination cursor
+  string search_query = 3;     // Optional text search
+  ClipboardContentType filter_type = 4;
+}
+
+message ClipboardHistoryResponse {
+  repeated ClipboardHistoryEntry entries = 1;
+  bool has_more = 2;
+}
+
+message ClipboardHistoryEntry {
+  string entry_id = 1;
+  ClipboardContentType content_type = 2;
+  string preview = 3;        // Text preview (first 200 chars) or thumbnail ref
+  string source_app = 4;
+  uint64 timestamp = 5;
+  uint64 size_bytes = 6;
+  bool pinned = 7;
+}
+
+// Request full content of a history entry
+message ClipboardEntryRequest {
+  string entry_id = 1;
+}
+
+message ClipboardEntryResponse {
+  ClipboardUpdate entry = 1;
+}
+
+// ============================================================
+// Clipboard Actions
+// ============================================================
+
+message ClipboardAction {
+  string entry_id = 1;
+  ClipboardActionType action = 2;
+}
+
+enum ClipboardActionType {
+  CLIPBOARD_ACTION_UNSPECIFIED = 0;
+  PIN = 1;
+  UNPIN = 2;
+  DELETE = 3;
+  COPY_TO_DEVICE = 4;  // Push to another device's clipboard
+  CLEAR_HISTORY = 5;
+}

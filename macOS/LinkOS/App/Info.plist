@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>LinkOS</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.linkos.macos</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>LinkOS</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <false/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 LinkOS Team. All rights reserved.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>LinkOS needs access to the local network to discover and connect with your Android companion device.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>LinkOS uses Bluetooth Low Energy for proximity presence detection and auto-lock features.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>LinkOS requires Screen Recording permission to stream your Mac desktop screen to your paired Android device for Remote Desktop.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>LinkOS requires Accessibility permission to simulate wireless trackpad gestures, mouse clicks, and keyboard shortcuts from your phone.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>LinkOS requires Microphone permission for real-time audio streaming.</string>
+</dict>
+</plist>

@@ -1,0 +1,133 @@
+// LinkOS Security Protocol
+// Handles authentication, permissions, and encryption negotiation.
+
+syntax = "proto3";
+package linkos.security;
+
+option java_package = "com.linkos.core.protocol.generated";
+option java_multiple_files = true;
+option swift_prefix = "LOS";
+
+// ============================================================
+// Permission System
+// ============================================================
+
+message PermissionRequest {
+  string device_id = 1;
+  repeated Permission permissions = 2;
+  string reason = 3;  // Human-readable reason for the request
+}
+
+message PermissionResponse {
+  repeated PermissionGrant grants = 1;
+}
+
+message PermissionGrant {
+  Permission permission = 1;
+  bool granted = 2;
+  uint64 expires_at = 3;  // 0 = permanent until revoked
+  string denial_reason = 4;
+}
+
+enum Permission {
+  PERMISSION_UNSPECIFIED = 0;
+  SCREEN_VIEW = 1;
+  SCREEN_CONTROL = 2;
+  KEYBOARD_INPUT = 3;
+  MOUSE_INPUT = 4;
+  CLIPBOARD_READ = 5;
+  CLIPBOARD_WRITE = 6;
+  FILE_READ = 7;
+  FILE_WRITE = 8;
+  FILE_DELETE = 9;
+  TERMINAL_ACCESS = 10;
+  NOTIFICATION_READ = 11;
+  NOTIFICATION_INTERACT = 12;
+  SYSTEM_INFO = 13;
+  MEDIA_CONTROL = 14;
+  APP_LAUNCH = 15;
+  SYSTEM_CONTROL = 16;    // Shutdown, sleep, lock, etc.
+  MICROPHONE = 17;
+  CAMERA = 18;
+  AI_COMMANDS = 19;
+  WORKFLOW_EXECUTE = 20;
+  // Extension point
+  // Permissions 100+ are reserved for plugins
+}
+
+// ============================================================
+// Biometric Authentication
+// ============================================================
+
+message BiometricChallenge {
+  string challenge_id = 1;
+  string reason = 2;  // e.g., "Approve terminal access"
+  BiometricType required_type = 3;
+  uint64 timeout_ms = 4;
+}
+
+message BiometricResponse {
+  string challenge_id = 1;
+  bool authenticated = 2;
+  BiometricType used_type = 3;
+  bytes signed_attestation = 4;  // Platform-specific attestation
+}
+
+enum BiometricType {
+  BIOMETRIC_UNSPECIFIED = 0;
+  FINGERPRINT = 1;
+  FACE = 2;
+  DEVICE_CREDENTIAL = 3;  // PIN/Pattern/Password fallback
+  ANY = 4;
+}
+
+// ============================================================
+// NFC Tap-to-Action
+// ============================================================
+
+// Payload written to NFC sticker (NDEF record)
+message NFCTagPayload {
+  string tag_id = 1;        // Unique tag identifier
+  string mac_device_id = 2; // The Mac this tag is associated with
+  bytes encrypted_token = 3; // AES-encrypted action token
+}
+
+// Sent over BLE/Wi-Fi after NFC scan + biometric auth
+message NFCActionRequest {
+  string tag_id = 1;
+  string mac_device_id = 2;
+  NFCAction action = 3;
+  bytes biometric_attestation = 4;
+  uint64 timestamp = 5;
+  bytes nonce = 6;
+}
+
+message NFCActionResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+enum NFCAction {
+  NFC_ACTION_UNSPECIFIED = 0;
+  UNLOCK_MAC = 1;
+  LOCK_MAC = 2;
+  OPEN_WORKSPACE = 3;
+  LAUNCH_APPS = 4;
+  RUN_WORKFLOW = 5;
+  START_REMOTE_SESSION = 6;
+}
+
+// ============================================================
+// Key Rotation
+// ============================================================
+
+message KeyRotationRequest {
+  bytes new_ephemeral_public_key = 1;
+  uint64 current_key_id = 2;
+}
+
+message KeyRotationResponse {
+  bytes new_ephemeral_public_key = 1;
+  uint64 new_key_id = 2;
+  bool accepted = 3;
+}

@@ -1,0 +1,26 @@
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Swift/Xcode/SPM
+.build/
+macOS/.build/
+*.log
+
+# Android/Gradle
+.gradle/
+android/.gradle/
+**/build/
+android/app/build/
+android/.kotlin/
+android/local.properties
+*.apk
+
+# Temporary files / custom logs
+compile.log
+logcat_install.txt

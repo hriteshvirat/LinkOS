@@ -1,0 +1,199 @@
+// LinkOS Filesystem Protocol
+// Handles file browsing, operations, and transfer.
+
+syntax = "proto3";
+package linkos.filesystem;
+
+option java_package = "com.linkos.core.protocol.generated";
+option java_multiple_files = true;
+option swift_prefix = "LOS";
+
+// ============================================================
+// File Browsing
+// ============================================================
+
+message ListDirectoryRequest {
+  string path = 1;            // Absolute path on macOS
+  bool include_hidden = 2;
+  SortOrder sort = 3;
+  string search_query = 4;   // Optional filter
+}
+
+message ListDirectoryResponse {
+  string path = 1;
+  repeated FileEntry entries = 2;
+  bool permission_denied = 3;
+  string error_message = 4;
+}
+
+message FileEntry {
+  string name = 1;
+  string path = 2;
+  FileType type = 3;
+  uint64 size_bytes = 4;
+  uint64 created_at = 5;
+  uint64 modified_at = 6;
+  string mime_type = 7;
+  bool is_hidden = 8;
+  bool is_symlink = 9;
+  string permissions = 10;     // Unix permission string (e.g., "rwxr-xr-x")
+  string owner = 11;
+  // For Quick Look preview
+  bool has_preview = 12;
+  string thumbnail_data_channel_id = 13;
+}
+
+enum FileType {
+  FILE_TYPE_UNSPECIFIED = 0;
+  REGULAR_FILE = 1;
+  DIRECTORY = 2;
+  SYMLINK = 3;
+  APPLICATION = 4;
+  BUNDLE = 5;
+}
+
+enum SortOrder {
+  SORT_ORDER_UNSPECIFIED = 0;
+  NAME_ASC = 1;
+  NAME_DESC = 2;
+  SIZE_ASC = 3;
+  SIZE_DESC = 4;
+  MODIFIED_ASC = 5;
+  MODIFIED_DESC = 6;
+  TYPE_ASC = 7;
+}
+
+// ============================================================
+// File Operations
+// ============================================================
+
+message FileOperationRequest {
+  FileOperation operation = 1;
+  string source_path = 2;
+  string destination_path = 3;  // For copy/move/rename
+  bool force = 4;               // Overwrite if exists
+}
+
+message FileOperationResponse {
+  bool success = 1;
+  string error_message = 2;
+  FileEntry result_entry = 3;  // The resulting file after operation
+}
+
+enum FileOperation {
+  FILE_OPERATION_UNSPECIFIED = 0;
+  COPY = 1;
+  MOVE = 2;
+  RENAME = 3;
+  DELETE = 4;
+  CREATE_DIRECTORY = 5;
+  TRASH = 6;     // Move to Trash instead of permanent delete
+}
+
+// ============================================================
+// File Transfer
+// ============================================================
+
+message FileTransferRequest {
+  string transfer_id = 1;
+  TransferDirection direction = 2;
+  string file_path = 3;
+  string file_name = 4;
+  uint64 file_size = 5;
+  string mime_type = 6;
+  string checksum_sha256 = 7;
+  // Chunked transfer support
+  uint32 chunk_size = 8;        // Default 256KB
+  bool resume_supported = 9;
+}
+
+message FileTransferResponse {
+  string transfer_id = 1;
+  bool accepted = 2;
+  string data_channel_id = 3;   // WebRTC data channel for transfer
+  uint64 resume_offset = 4;    // Resume from this byte offset
+  string rejection_reason = 5;
+}
+
+enum TransferDirection {
+  TRANSFER_DIRECTION_UNSPECIFIED = 0;
+  MAC_TO_ANDROID = 1;
+  ANDROID_TO_MAC = 2;
+}
+
+message FileTransferProgress {
+  string transfer_id = 1;
+  uint64 bytes_transferred = 2;
+  uint64 total_bytes = 3;
+  double speed_bytes_per_sec = 4;
+  uint32 eta_seconds = 5;
+  TransferStatus status = 6;
+}
+
+enum TransferStatus {
+  TRANSFER_STATUS_UNSPECIFIED = 0;
+  QUEUED = 1;
+  IN_PROGRESS = 2;
+  PAUSED = 3;
+  COMPLETED = 4;
+  FAILED = 5;
+  CANCELLED = 6;
+}
+
+message FileTransferControl {
+  string transfer_id = 1;
+  TransferControlAction action = 2;
+}
+
+enum TransferControlAction {
+  TRANSFER_CONTROL_UNSPECIFIED = 0;
+  PAUSE_TRANSFER = 1;
+  RESUME_TRANSFER = 2;
+  CANCEL_TRANSFER = 3;
+}
+
+// ============================================================
+// File Preview
+// ============================================================
+
+message FilePreviewRequest {
+  string path = 1;
+  uint32 max_width = 2;
+  uint32 max_height = 3;
+  PreviewType preview_type = 4;
+}
+
+message FilePreviewResponse {
+  string path = 1;
+  PreviewType preview_type = 2;
+  bytes preview_data = 3;      // For small previews inline
+  string data_channel_id = 4;  // For large previews via data channel
+  string mime_type = 5;
+  uint32 width = 6;
+  uint32 height = 7;
+}
+
+enum PreviewType {
+  PREVIEW_TYPE_UNSPECIFIED = 0;
+  THUMBNAIL = 1;
+  QUICK_LOOK = 2;
+  TEXT_PREVIEW = 3;
+  CODE_PREVIEW = 4;
+}
+
+// ============================================================
+// Favorites & Recents
+// ============================================================
+
+message FavoritesRequest {}
+
+message FavoritesResponse {
+  repeated FileEntry favorites = 1;
+  repeated FileEntry recent_files = 2;
+  repeated FileEntry recent_directories = 3;
+}
+
+message FavoriteAction {
+  string path = 1;
+  bool add = 2;  // true = add, false = remove
+}

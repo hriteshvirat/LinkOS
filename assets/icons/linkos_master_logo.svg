@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Background Gradient -->
+    <radialGradient id="bgGlow" cx="50%" cy="50%" r="55%" fx="50%" fy="50%">
+      <stop offset="0%" stop-color="#101426"/>
+      <stop offset="60%" stop-color="#080914"/>
+      <stop offset="100%" stop-color="#040409"/>
+    </radialGradient>
+
+    <!-- Neon Tube Blue to Purple Gradient -->
+    <linearGradient id="neonTrackGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="35%" stop-color="#00F0FF"/>
+      <stop offset="70%" stop-color="#8B5CF6"/>
+      <stop offset="100%" stop-color="#C084FC"/>
+    </linearGradient>
+
+    <!-- Glass Rim Neon Glow -->
+    <linearGradient id="rimGlowGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="50%" stop-color="#00F0FF"/>
+      <stop offset="100%" stop-color="#1E1B4B"/>
+    </linearGradient>
+
+    <!-- Glow Filters -->
+    <filter id="trackGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur1"/>
+      <feGaussianBlur stdDeviation="32" result="blur2"/>
+      <feMerge>
+        <feMergeNode in="blur2"/>
+        <feMergeNode in="blur1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="orbGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- App Tile Base (macOS Squircle shape) -->
+  <rect x="32" y="32" width="960" height="960" rx="224" ry="224" fill="url(#bgGlow)" stroke="url(#rimGlowGrad)" stroke-width="8"/>
+
+  <!-- Inner Glass Reflection Curve -->
+  <path d="M 40 240 C 240 80 780 80 984 240 C 984 126 882 40 768 40 H 256 C 142 40 40 126 40 240 Z" fill="#FFFFFF" fill-opacity="0.06"/>
+
+  <!-- Distinctive L-Shaped Continuous Loop Track -->
+  <path d="M 310,480 
+           V 300 
+           A 60,60 0 0,1 370,240 
+           A 60,60 0 0,1 430,300 
+           V 440 
+           A 40,40 0 0,0 470,480 
+           H 590 
+           A 80,80 0 0,1 670,560 
+           A 80,80 0 0,1 750,480 
+           V 640 
+           A 120,120 0 0,1 630,760 
+           H 430 
+           A 120,120 0 0,1 310,640 
+           Z" 
+        fill="none" 
+        stroke="url(#neonTrackGrad)" 
+        stroke-width="38" 
+        stroke-linecap="round" 
+        stroke-linejoin="round" 
+        filter="url(#trackGlow)"/>
+
+  <!-- Inner Core Line for Neon Tube -->
+  <path d="M 310,480 
+           V 300 
+           A 60,60 0 0,1 370,240 
+           A 60,60 0 0,1 430,300 
+           V 440 
+           A 40,40 0 0,0 470,480 
+           H 590 
+           A 80,80 0 0,1 670,560 
+           A 80,80 0 0,1 750,480 
+           V 640 
+           A 120,120 0 0,1 630,760 
+           H 430 
+           A 120,120 0 0,1 310,640 
+           Z" 
+        fill="none" 
+        stroke="#FFFFFF" 
+        stroke-opacity="0.75" 
+        stroke-width="10" 
+        stroke-linecap="round"/>
+
+  <!-- Top Glowing Orb Node -->
+  <circle cx="585" cy="480" r="22" fill="#FFFFFF" filter="url(#orbGlow)"/>
+  <circle cx="585" cy="480" r="14" fill="#E0E7FF"/>
+
+  <!-- Bottom Glowing Orb Node -->
+  <circle cx="530" cy="760" r="24" fill="#FFFFFF" filter="url(#orbGlow)"/>
+  <circle cx="530" cy="760" r="15" fill="#E0E7FF"/>
+
+  <!-- Middle Cosmic Particle Wave Beam -->
+  <path d="M 330,600 C 440,540 580,540 700,600 C 580,560 440,560 330,600 Z" fill="#00F0FF" fill-opacity="0.4" filter="url(#trackGlow)"/>
+  <path d="M 340,598 Q 515,545 690,598" fill="none" stroke="#FFFFFF" stroke-opacity="0.8" stroke-width="2"/>
+
+  <!-- Left Device: Mac Laptop -->
+  <g transform="translate(160, 470)">
+    <!-- Laptop Shell Screen -->
+    <rect x="20" y="10" width="220" height="142" rx="10" ry="10" fill="#181E29" stroke="#383D4A" stroke-width="3"/>
+    <rect x="28" y="18" width="204" height="126" rx="4" ry="4" fill="#080C14"/>
+    <!-- Glowing Apple Logo on Mac Display -->
+    <path d="M 130 70 C 124 70 120 76 120 82 C 120 90 126 96 130 96 C 134 96 140 90 140 82 C 140 76 136 70 130 70 Z" fill="#FFFFFF" filter="url(#trackGlow)"/>
+    <!-- Mac Keyboard Base -->
+    <path d="M 0 156 L 15 150 H 245 L 260 156 C 260 162 254 166 244 166 H 16 C 6 166 0 162 0 156 Z" fill="#252A36" stroke="#4B5563" stroke-width="2"/>
+  </g>
+
+  <!-- Right Device: Android Smartphone -->
+  <g transform="translate(680, 460)">
+    <!-- Phone Body -->
+    <rect x="20" y="10" width="130" height="240" rx="26" ry="26" fill="#181326" stroke="#4A3B69" stroke-width="3"/>
+    <rect x="28" y="18" width="114" height="224" rx="20" ry="20" fill="#0A0612"/>
+    <!-- Dynamic Notch -->
+    <rect x="67" y="26" width="36" height="8" rx="4" ry="4" fill="#000000"/>
+    <!-- Glowing Green Android Bugdroid Logo on Screen -->
+    <g transform="translate(62, 100) scale(1.3)">
+      <!-- Head -->
+      <path d="M 12 12 A 10 10 0 0 1 32 12 Z" fill="#3DDC84"/>
+      <!-- Eyes -->
+      <circle cx="17" cy="8" r="1.5" fill="#0A0612"/>
+      <circle cx="27" cy="8" r="1.5" fill="#0A0612"/>
+      <!-- Antennas -->
+      <line x1="15" y1="4" x2="12" y2="1" stroke="#3DDC84" stroke-width="2" stroke-linecap="round"/>
+      <line x1="29" y1="4" x2="32" y2="1" stroke="#3DDC84" stroke-width="2" stroke-linecap="round"/>
+      <!-- Body -->
+      <rect x="12" y="14" width="20" height="16" rx="3" fill="#3DDC84"/>
+    </g>
+  </g>
+
+</svg>

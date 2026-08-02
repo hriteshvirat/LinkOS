@@ -1,0 +1,108 @@
+// LinkOS Notifications Protocol
+// Handles mirroring macOS notifications to Android.
+
+syntax = "proto3";
+package linkos.notifications;
+
+option java_package = "com.linkos.core.protocol.generated";
+option java_multiple_files = true;
+option swift_prefix = "LOS";
+
+// ============================================================
+// Notification Mirroring
+// ============================================================
+
+message NotificationEvent {
+  string notification_id = 1;
+  string app_name = 2;
+  string app_bundle_id = 3;
+  string title = 4;
+  string subtitle = 5;
+  string body = 6;
+  uint64 timestamp = 7;
+  string app_icon_base64 = 8;
+  bytes attachment_data = 9;       // Image attachment if small
+  string attachment_mime_type = 10;
+  NotificationCategory category = 11;
+  repeated NotificationAction actions = 12;
+  bool is_update = 13;            // Update to existing notification
+  string group_id = 14;           // Notification grouping
+}
+
+enum NotificationCategory {
+  NOTIFICATION_CATEGORY_UNSPECIFIED = 0;
+  MESSAGE = 1;
+  EMAIL = 2;
+  SOCIAL = 3;
+  NEWS = 4;
+  SYSTEM = 5;
+  CALENDAR = 6;
+  REMINDER = 7;
+  OTHER = 8;
+}
+
+message NotificationAction {
+  string action_id = 1;
+  string label = 2;
+  NotificationActionType type = 3;
+  bool requires_text_input = 4;
+  string text_input_placeholder = 5;
+}
+
+enum NotificationActionType {
+  NOTIFICATION_ACTION_UNSPECIFIED = 0;
+  REPLY = 1;
+  DISMISS = 2;
+  ARCHIVE = 3;
+  MARK_READ = 4;
+  CUSTOM = 5;
+}
+
+// ============================================================
+// Notification Interaction
+// ============================================================
+
+message NotificationInteraction {
+  string notification_id = 1;
+  string action_id = 2;
+  InteractionType interaction = 3;
+  string text_response = 4;  // For reply actions
+}
+
+enum InteractionType {
+  INTERACTION_UNSPECIFIED = 0;
+  CLICKED = 1;
+  DISMISSED = 2;
+  ACTION_TRIGGERED = 3;
+  REPLIED = 4;
+}
+
+message NotificationInteractionResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+// ============================================================
+// Notification Settings
+// ============================================================
+
+message NotificationSettingsRequest {}
+
+message NotificationSettingsResponse {
+  repeated AppNotificationSetting apps = 1;
+}
+
+message AppNotificationSetting {
+  string bundle_id = 1;
+  string app_name = 2;
+  bool enabled = 3;
+  bool show_previews = 4;
+  bool play_sound = 5;
+}
+
+message UpdateNotificationSetting {
+  string bundle_id = 1;
+  bool enabled = 2;
+  bool show_previews = 3;
+  bool play_sound = 4;
+}

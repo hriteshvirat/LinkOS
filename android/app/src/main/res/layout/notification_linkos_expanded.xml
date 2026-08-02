@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/notification_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="LinkOS Active"
+        android:textColor="#202124"
+        android:textSize="15sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/notification_subtitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:text="Connected to Mac (Hritesh's MacBook Pro)"
+        android:textColor="#5F6368"
+        android:textSize="13sp" />
+
+    <!-- Button Row 1 -->
+    <LinearLayout
+        android:id="@+id/row_1"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal"
+        android:weightSum="4">
+
+        <!-- Brightness - -->
+        <LinearLayout
+            android:id="@+id/btn_brightness_down"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_notification_circle"
+                android:padding="12dp"
+                android:src="@drawable/ic_brightness_down"
+                android:tint="#7A3A1E" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Brightness -"
+                android:textColor="#202124"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <!-- Brightness + -->
+        <LinearLayout
+            android:id="@+id/btn_brightness_up"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_notification_circle"
+                android:padding="12dp"
+                android:src="@drawable/ic_brightness_up"
+                android:tint="#7A3A1E" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Brightness +"
+                android:textColor="#202124"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <!-- Volume - -->
+        <LinearLayout
+            android:id="@+id/btn_volume_down"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_notification_circle"
+                android:padding="12dp"
+                android:src="@drawable/ic_volume_down"
+                android:tint="#7A3A1E" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Volume -"
+                android:textColor="#202124"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <!-- Volume + -->
+        <LinearLayout
+            android:id="@+id/btn_volume_up"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_notification_circle"
+                android:padding="12dp"
+                android:src="@drawable/ic_volume_up"
+                android:tint="#7A3A1E" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Volume +"
+                android:textColor="#202124"
+                android:textSize="10sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Button Row 2 -->
+    <LinearLayout
+        android:id="@+id/row_2"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:weightSum="3">
+
+        <!-- Screenshot -->
+        <LinearLayout
+            android:id="@+id/btn_screenshot"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_notification_circle"
+                android:padding="12dp"
+                android:src="@drawable/ic_screenshot"
+                android:tint="#7A3A1E" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Screenshot"
+                android:textColor="#202124"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <!-- Copy to Mac -->
+        <LinearLayout
+            android:id="@+id/btn_send_to_mac"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_notification_circle"
+                android:padding="12dp"
+                android:src="@drawable/ic_send_to_mac"
+                android:tint="#7A3A1E" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Copy to Mac"
+                android:textColor="#202124"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <!-- Disconnect -->
+        <LinearLayout
+            android:id="@+id/btn_disconnect"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_notification_circle"
+                android:padding="12dp"
+                android:src="@drawable/ic_disconnect"
+                android:tint="#7A3A1E" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Disconnect"
+                android:textColor="#202124"
+                android:textSize="10sp" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

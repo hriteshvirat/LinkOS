@@ -1,0 +1,129 @@
+// LinkOS Discovery & Pairing Protocol
+// Handles zero-config device discovery via Bonjour/mDNS
+// and secure device pairing via ECDH key exchange.
+
+syntax = "proto3";
+package linkos.discovery;
+
+option java_package = "com.linkos.core.protocol.generated";
+option java_multiple_files = true;
+option swift_prefix = "LOS";
+
+import "linkos.proto";
+
+// ============================================================
+// Service Discovery
+// ============================================================
+
+// Bonjour TXT record fields published by macOS host
+message ServiceRecord {
+  string device_id = 1;
+  string device_name = 2;
+  string model = 3;              // e.g., "MacBook Pro (16-inch, 2024)"
+  uint32 protocol_version = 4;
+  bool requires_pairing = 5;
+  string public_key_fingerprint = 6;  // SHA-256 of device public key
+}
+
+// ============================================================
+// Pairing Flow
+// ============================================================
+
+// Step 1: Initiator sends pairing request
+message PairingRequest {
+  linkos.DeviceInfo device_info = 1;
+  PairingMethod method = 2;
+  bytes ephemeral_public_key = 3;  // ECDH P-256 ephemeral public key
+}
+
+enum PairingMethod {
+  PAIRING_METHOD_UNSPECIFIED = 0;
+  QR_CODE = 1;         // Scan QR code displayed on Mac
+  NUMERIC_CODE = 2;    // Enter 6-digit code shown on Mac
+  PROXIMITY = 3;       // BLE proximity + user confirmation
+}
+
+// Step 2: Responder sends pairing response
+message PairingResponse {
+  bool accepted = 1;
+  linkos.DeviceInfo device_info = 2;
+  bytes ephemeral_public_key = 3;  // ECDH P-256 ephemeral public key
+  bytes encrypted_challenge = 4;   // Challenge encrypted with derived key
+  string rejection_reason = 5;     // If not accepted
+}
+
+// Step 3: Initiator confirms with challenge response
+message PairingConfirmation {
+  bytes challenge_response = 1;    // Decrypted + re-encrypted challenge
+  bytes device_certificate = 2;    // Long-term device identity certificate
+}
+
+// Step 4: Pairing complete — exchange long-term identity keys
+message PairingComplete {
+  bool success = 1;
+  bytes device_certificate = 2;    // Long-term device identity certificate
+  repeated string granted_permissions = 3;
+  string error_message = 4;       // If not successful
+}
+
+// ============================================================
+// QR Code Payload
+// ============================================================
+
+// Encoded in the QR code displayed by the Mac
+message QRCodePayload {
+  string device_id = 1;
+  string device_name = 2;
+  bytes ephemeral_public_key = 3;
+  uint32 port = 4;
+  string ip_address = 5;  // Local network IP
+  uint64 expiry = 6;      // Unix timestamp — QR codes expire after 5 minutes
+  bytes nonce = 7;        // One-time nonce for this pairing attempt
+}
+
+// ============================================================
+// Session Resumption
+// ============================================================
+
+// Sent on reconnection to resume an existing session
+message SessionResume {
+  string device_id = 1;
+  bytes session_ticket = 2;       // Encrypted session resumption ticket
+  uint64 last_seen_sequence = 3;  // For message ordering
+}
+
+message SessionResumeResponse {
+  bool accepted = 1;
+  uint64 server_sequence = 2;
+  string new_session_id = 3;
+  string rejection_reason = 4;
+}
+
+// ============================================================
+// Device Management
+// ============================================================
+
+message PairedDevice {
+  string device_id = 1;
+  string device_name = 2;
+  linkos.DeviceType device_type = 3;
+  uint64 paired_at = 4;
+  uint64 last_connected = 5;
+  bool is_online = 6;
+  repeated string permissions = 7;
+  string public_key_fingerprint = 8;
+}
+
+message DeviceListRequest {}
+
+message DeviceListResponse {
+  repeated PairedDevice devices = 1;
+}
+
+message RevokeDeviceRequest {
+  string device_id = 1;
+}
+
+message RevokeDeviceResponse {
+  bool success = 1;
+}

@@ -1,0 +1,222 @@
+// LinkOS System Dashboard Protocol
+// Handles system metrics, running processes, and monitoring.
+
+syntax = "proto3";
+package linkos.system;
+
+option java_package = "com.linkos.core.protocol.generated";
+option java_multiple_files = true;
+option swift_prefix = "LOS";
+
+// ============================================================
+// System Metrics
+// ============================================================
+
+message SystemMetricsRequest {
+  uint32 interval_ms = 1;    // Update interval (default 1000ms)
+  repeated MetricType metrics = 2;  // Which metrics to stream
+}
+
+message SystemMetricsUpdate {
+  uint64 timestamp = 1;
+  CpuMetrics cpu = 2;
+  GpuMetrics gpu = 3;
+  MemoryMetrics memory = 4;
+  StorageMetrics storage = 5;
+  BatteryMetrics battery = 6;
+  ThermalMetrics thermal = 7;
+  NetworkMetrics network = 8;
+  repeated ProcessInfo top_processes = 9;
+}
+
+enum MetricType {
+  METRIC_TYPE_UNSPECIFIED = 0;
+  CPU = 1;
+  GPU = 2;
+  MEMORY = 3;
+  STORAGE = 4;
+  BATTERY = 5;
+  THERMAL = 6;
+  NETWORK = 7;
+  PROCESSES = 8;
+  ALL = 9;
+}
+
+message CpuMetrics {
+  double user_percent = 1;
+  double system_percent = 2;
+  double idle_percent = 3;
+  double total_percent = 4;
+  repeated double per_core_percent = 5;
+  uint32 core_count = 6;
+  uint32 thread_count = 7;
+  string model_name = 8;        // e.g., "Apple M3 Max"
+  double frequency_ghz = 9;
+}
+
+message GpuMetrics {
+  double utilization_percent = 1;
+  uint64 memory_used_bytes = 2;
+  uint64 memory_total_bytes = 3;
+  string model_name = 4;
+  double temperature_celsius = 5;
+}
+
+message MemoryMetrics {
+  uint64 total_bytes = 1;
+  uint64 used_bytes = 2;
+  uint64 available_bytes = 3;
+  uint64 wired_bytes = 4;
+  uint64 compressed_bytes = 5;
+  uint64 swap_used_bytes = 6;
+  uint64 swap_total_bytes = 7;
+  double memory_pressure = 8;   // 0.0 to 1.0
+}
+
+message StorageMetrics {
+  repeated DiskInfo disks = 1;
+}
+
+message DiskInfo {
+  string name = 1;
+  string mount_point = 2;
+  uint64 total_bytes = 3;
+  uint64 used_bytes = 4;
+  uint64 available_bytes = 5;
+  string filesystem_type = 6;
+  double read_speed_mbps = 7;
+  double write_speed_mbps = 8;
+}
+
+message BatteryMetrics {
+  double percent = 1;
+  bool is_charging = 2;
+  bool is_plugged_in = 3;
+  uint32 time_remaining_minutes = 4;
+  uint32 cycle_count = 5;
+  string health = 6;            // "Normal", "Service Recommended"
+  double temperature_celsius = 7;
+  double wattage = 8;
+}
+
+message ThermalMetrics {
+  double cpu_temperature = 1;
+  double gpu_temperature = 2;
+  repeated FanInfo fans = 3;
+  ThermalState thermal_state = 4;
+}
+
+message FanInfo {
+  string name = 1;
+  uint32 current_rpm = 2;
+  uint32 min_rpm = 3;
+  uint32 max_rpm = 4;
+}
+
+enum ThermalState {
+  THERMAL_STATE_UNSPECIFIED = 0;
+  NOMINAL = 1;
+  FAIR = 2;
+  SERIOUS = 3;
+  CRITICAL = 4;
+}
+
+message NetworkMetrics {
+  repeated NetworkInterface interfaces = 1;
+  double upload_speed_mbps = 2;
+  double download_speed_mbps = 3;
+  uint64 total_bytes_sent = 4;
+  uint64 total_bytes_received = 5;
+  string public_ip = 6;
+  string local_ip = 7;
+}
+
+message NetworkInterface {
+  string name = 1;          // e.g., "en0"
+  string display_name = 2;  // e.g., "Wi-Fi"
+  string ip_address = 3;
+  string mac_address = 4;
+  bool is_active = 5;
+}
+
+// ============================================================
+// Process Management
+// ============================================================
+
+message ProcessInfo {
+  int32 pid = 1;
+  string name = 2;
+  string bundle_id = 3;
+  double cpu_percent = 4;
+  uint64 memory_bytes = 5;
+  ProcessStatus status = 6;
+  string user = 7;
+  uint64 started_at = 8;
+  string icon_base64 = 9;   // Small app icon
+}
+
+enum ProcessStatus {
+  PROCESS_STATUS_UNSPECIFIED = 0;
+  RUNNING = 1;
+  SLEEPING = 2;
+  STOPPED = 3;
+  ZOMBIE = 4;
+}
+
+message ProcessListRequest {
+  SortBy sort_by = 1;
+  uint32 limit = 2;
+}
+
+enum SortBy {
+  SORT_BY_UNSPECIFIED = 0;
+  CPU_USAGE = 1;
+  MEMORY_USAGE = 2;
+  NAME = 3;
+  PID = 4;
+}
+
+message ProcessAction {
+  int32 pid = 1;
+  ProcessActionType action = 2;
+}
+
+enum ProcessActionType {
+  PROCESS_ACTION_UNSPECIFIED = 0;
+  KILL = 1;
+  FORCE_KILL = 2;
+  ACTIVATE = 3;   // Bring to front
+}
+
+// ============================================================
+// App Launcher
+// ============================================================
+
+message InstalledAppsRequest {
+  string search_query = 1;
+}
+
+message InstalledAppsResponse {
+  repeated AppInfo apps = 1;
+}
+
+message AppInfo {
+  string name = 1;
+  string bundle_id = 2;
+  string path = 3;
+  string version = 4;
+  string icon_base64 = 5;
+  bool is_running = 6;
+}
+
+message LaunchAppRequest {
+  string bundle_id = 1;
+  string path = 2;            // Alternative: launch by path
+  repeated string arguments = 3;
+}
+
+message LaunchAppResponse {
+  bool success = 1;
+  int32 pid = 2;
+  string error_message = 3;
+}

@@ -1,0 +1,135 @@
+// LinkOS Stream Deck Protocol
+// Handles configurable action buttons, macros, and folders.
+
+syntax = "proto3";
+package linkos.streamdeck;
+
+option java_package = "com.linkos.core.protocol.generated";
+option java_multiple_files = true;
+option swift_prefix = "LOS";
+
+// ============================================================
+// Stream Deck Layout
+// ============================================================
+
+message StreamDeckLayoutRequest {}
+
+message StreamDeckLayoutResponse {
+  StreamDeckPage root_page = 1;
+}
+
+message StreamDeckPage {
+  string page_id = 1;
+  string name = 2;
+  uint32 columns = 3;           // Grid columns
+  uint32 rows = 4;              // Grid rows
+  repeated StreamDeckButton buttons = 5;
+  string parent_page_id = 6;   // For navigation (empty = root)
+}
+
+message StreamDeckButton {
+  string button_id = 1;
+  uint32 position = 2;          // Grid position (row * columns + col)
+  string label = 3;
+  string icon_name = 4;         // SF Symbol name or custom icon
+  bytes custom_icon_data = 5;   // Custom icon PNG data
+  string background_color = 6;  // Hex color
+  ButtonType type = 7;
+  
+  // Action configuration
+  StreamDeckAction action = 8;
+  
+  // Folder navigation
+  string target_page_id = 9;   // If type == FOLDER
+  
+  // Toggle state
+  bool is_toggle = 10;
+  bool toggle_state = 11;
+  string toggle_on_label = 12;
+  string toggle_off_label = 13;
+}
+
+enum ButtonType {
+  BUTTON_TYPE_UNSPECIFIED = 0;
+  ACTION_BUTTON = 1;
+  FOLDER = 2;
+  TOGGLE = 3;
+  SPACER = 4;
+  BACK = 5;
+}
+
+// ============================================================
+// Stream Deck Actions
+// ============================================================
+
+message StreamDeckAction {
+  StreamDeckActionType type = 1;
+  map<string, string> parameters = 2;
+}
+
+enum StreamDeckActionType {
+  STREAM_DECK_ACTION_UNSPECIFIED = 0;
+  LAUNCH_APP = 1;
+  KEYBOARD_SHORTCUT = 2;
+  RUN_COMMAND = 3;
+  OPEN_URL = 4;
+  OPEN_FILE = 5;
+  SYSTEM_CONTROL = 6;          // Mute, volume, brightness
+  MEDIA_CONTROL = 7;           // Play, pause, next, prev
+  RUN_WORKFLOW = 8;
+  SEND_TEXT = 9;
+  TOGGLE_SETTING = 10;         // Dark mode, DND, etc.
+  MULTI_ACTION = 11;           // Sequential actions (macro)
+  AI_COMMAND = 12;
+}
+
+// Multi-action (macro) definition
+message MultiAction {
+  repeated StreamDeckAction actions = 1;
+  repeated uint32 delays_ms = 2;  // Delay between each action
+}
+
+// ============================================================
+// Stream Deck Interaction
+// ============================================================
+
+message ButtonPressEvent {
+  string button_id = 1;
+  ButtonPressType press_type = 2;
+}
+
+enum ButtonPressType {
+  BUTTON_PRESS_UNSPECIFIED = 0;
+  TAP = 1;
+  LONG_PRESS = 2;
+  DOUBLE_TAP = 3;
+}
+
+message ButtonPressResponse {
+  bool success = 1;
+  string error_message = 2;
+  // Updated button state after action
+  StreamDeckButton updated_button = 3;
+}
+
+// ============================================================
+// Stream Deck Configuration
+// ============================================================
+
+message UpdateButtonRequest {
+  StreamDeckButton button = 1;
+  string page_id = 2;
+}
+
+message CreatePageRequest {
+  StreamDeckPage page = 1;
+}
+
+message DeletePageRequest {
+  string page_id = 1;
+}
+
+message ReorderButtonsRequest {
+  string page_id = 1;
+  repeated string button_ids = 2;  // New order
+}

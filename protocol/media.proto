@@ -1,0 +1,164 @@
+// LinkOS Media Streaming Protocol
+// Handles screen capture, audio streaming, and second display.
+
+syntax = "proto3";
+package linkos.media;
+
+option java_package = "com.linkos.core.protocol.generated";
+option java_multiple_files = true;
+option swift_prefix = "LOS";
+
+// ============================================================
+// Screen Capture Configuration
+// ============================================================
+
+message ScreenCaptureRequest {
+  int32 monitor_index = 1;     // -1 = all monitors
+  CaptureQuality quality = 2;
+  uint32 max_fps = 3;          // Target frame rate
+  bool include_cursor = 4;
+  bool include_audio = 5;
+  CaptureCodec codec = 6;
+}
+
+message ScreenCaptureResponse {
+  bool success = 1;
+  string session_id = 2;
+  ScreenInfo screen_info = 3;
+  string error_message = 4;
+}
+
+message ScreenInfo {
+  uint32 width = 1;
+  uint32 height = 2;
+  double scale_factor = 3;    // Retina scale (1.0, 2.0, 3.0)
+  string display_name = 4;
+  int32 monitor_index = 5;
+}
+
+enum CaptureQuality {
+  CAPTURE_QUALITY_UNSPECIFIED = 0;
+  LOW = 1;         // 720p,  1 Mbps
+  MEDIUM = 2;      // 1080p, 3 Mbps
+  HIGH = 3;        // Native, 8 Mbps
+  ULTRA = 4;       // Native, 15 Mbps
+  ADAPTIVE = 5;    // Auto-adjust based on network
+}
+
+enum CaptureCodec {
+  CAPTURE_CODEC_UNSPECIFIED = 0;
+  H264 = 1;
+  H265 = 2;
+  VP9 = 3;
+  AV1 = 4;
+}
+
+// ============================================================
+// Adaptive Bitrate
+// ============================================================
+
+message BitrateControl {
+  uint32 target_bitrate_kbps = 1;
+  uint32 max_bitrate_kbps = 2;
+  uint32 min_bitrate_kbps = 3;
+  uint32 target_fps = 4;
+  bool hardware_encoding = 5;
+}
+
+message StreamStats {
+  string session_id = 1;
+  uint32 current_fps = 2;
+  uint32 current_bitrate_kbps = 3;
+  uint32 dropped_frames = 4;
+  uint32 latency_ms = 5;
+  uint32 jitter_ms = 6;
+  uint64 bytes_sent = 7;
+  double packet_loss_percent = 8;
+}
+
+// ============================================================
+// Multi-Monitor
+// ============================================================
+
+message MonitorListRequest {}
+
+message MonitorListResponse {
+  repeated MonitorInfo monitors = 1;
+}
+
+message MonitorInfo {
+  int32 index = 1;
+  string name = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+  double scale_factor = 5;
+  bool is_primary = 6;
+  int32 origin_x = 7;
+  int32 origin_y = 8;
+  bool is_builtin = 9;
+}
+
+// ============================================================
+// Stream Control
+// ============================================================
+
+message StreamControl {
+  string session_id = 1;
+  StreamAction action = 2;
+}
+
+enum StreamAction {
+  STREAM_ACTION_UNSPECIFIED = 0;
+  PAUSE = 1;
+  RESUME = 2;
+  STOP = 3;
+  SWITCH_MONITOR = 4;
+  REQUEST_KEYFRAME = 5;
+}
+
+// ============================================================
+// Audio Streaming
+// ============================================================
+
+message AudioConfig {
+  uint32 sample_rate = 1;     // 44100, 48000
+  uint32 channels = 2;        // 1 = mono, 2 = stereo
+  AudioCodec codec = 3;
+  uint32 bitrate_kbps = 4;
+}
+
+enum AudioCodec {
+  AUDIO_CODEC_UNSPECIFIED = 0;
+  OPUS = 1;
+  AAC = 2;
+}
+
+// ============================================================
+// Second Display (Tablet Mode)
+// ============================================================
+
+message SecondDisplayConfig {
+  uint32 width = 1;
+  uint32 height = 2;
+  double scale_factor = 3;
+  SecondDisplayMode mode = 4;
+}
+
+enum SecondDisplayMode {
+  SECOND_DISPLAY_MODE_UNSPECIFIED = 0;
+  EXTEND = 1;     // Extend desktop
+  MIRROR = 2;     // Mirror primary
+  REFERENCE = 3;  // Reference screen (specific app)
+}
+
+message SecondDisplayControl {
+  SecondDisplayAction action = 1;
+  SecondDisplayConfig config = 2;
+}
+
+enum SecondDisplayAction {
+  SECOND_DISPLAY_ACTION_UNSPECIFIED = 0;
+  ENABLE = 1;
+  DISABLE = 2;
+  RECONFIGURE = 3;
+}

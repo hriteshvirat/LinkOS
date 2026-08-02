@@ -1,0 +1,161 @@
+// LinkOS Input Protocol
+// Handles mouse, keyboard, trackpad gestures, and touch input.
+
+syntax = "proto3";
+package linkos.input;
+
+option java_package = "com.linkos.core.protocol.generated";
+option java_multiple_files = true;
+option swift_prefix = "LOS";
+
+// ============================================================
+// Mouse / Cursor Events
+// ============================================================
+
+message MouseEvent {
+  MouseEventType type = 1;
+  double x = 2;           // Normalized [0.0, 1.0] relative to screen
+  double y = 3;           // Normalized [0.0, 1.0] relative to screen
+  MouseButton button = 4;
+  uint32 click_count = 5; // 1 = single, 2 = double, 3 = triple
+  uint64 timestamp = 6;
+  int32 monitor_index = 7; // For multi-monitor
+}
+
+enum MouseEventType {
+  MOUSE_EVENT_UNSPECIFIED = 0;
+  MOVE = 1;
+  LEFT_DOWN = 2;
+  LEFT_UP = 3;
+  RIGHT_DOWN = 4;
+  RIGHT_UP = 5;
+  MIDDLE_DOWN = 6;
+  MIDDLE_UP = 7;
+  DRAG = 8;
+  LEFT_CLICK = 9;
+  RIGHT_CLICK = 10;
+  DOUBLE_CLICK = 11;
+}
+
+enum MouseButton {
+  MOUSE_BUTTON_NONE = 0;
+  LEFT = 1;
+  RIGHT = 2;
+  MIDDLE = 3;
+}
+
+// ============================================================
+// Keyboard Events
+// ============================================================
+
+message KeyboardEvent {
+  KeyEventType type = 1;
+  uint32 key_code = 2;       // Platform-independent virtual key code
+  string characters = 3;     // UTF-8 character(s) produced
+  uint32 modifiers = 4;      // Bitmask: Shift=1, Ctrl=2, Alt=4, Meta/Cmd=8
+  bool is_repeat = 5;
+  uint64 timestamp = 6;
+}
+
+enum KeyEventType {
+  KEY_EVENT_UNSPECIFIED = 0;
+  KEY_DOWN = 1;
+  KEY_UP = 2;
+  FLAGS_CHANGED = 3;  // Modifier key state change
+}
+
+// ============================================================
+// Trackpad / Gesture Events
+// ============================================================
+
+message GestureEvent {
+  GestureType type = 1;
+  GesturePhase phase = 2;
+  
+  // Scroll
+  double scroll_delta_x = 3;
+  double scroll_delta_y = 4;
+  
+  // Pinch
+  double scale = 5;
+  
+  // Rotation
+  double rotation_degrees = 6;
+  
+  // Swipe
+  SwipeDirection swipe_direction = 7;
+  
+  // Touch points (for multi-touch)
+  repeated TouchPoint touch_points = 8;
+  
+  uint32 finger_count = 9;
+  uint64 timestamp = 10;
+}
+
+enum GestureType {
+  GESTURE_TYPE_UNSPECIFIED = 0;
+  SCROLL = 1;
+  PINCH_ZOOM = 2;
+  ROTATION = 3;
+  SWIPE = 4;
+  TAP = 5;
+  LONG_PRESS = 6;
+  // macOS-specific gestures
+  MISSION_CONTROL = 7;     // Three-finger swipe up
+  APP_EXPOSE = 8;          // Three-finger swipe down
+  SPACES_LEFT = 9;         // Three-finger swipe left
+  SPACES_RIGHT = 10;       // Three-finger swipe right
+  SMART_ZOOM = 11;         // Two-finger double tap
+  LAUNCHPAD = 12;          // Pinch with thumb and three fingers
+  SHOW_DESKTOP = 13;       // Spread with thumb and three fingers
+}
+
+enum GesturePhase {
+  GESTURE_PHASE_UNSPECIFIED = 0;
+  BEGAN = 1;
+  CHANGED = 2;
+  ENDED = 3;
+  CANCELLED = 4;
+  // For momentum scrolling
+  MAY_BEGIN = 5;
+  MOMENTUM_PHASE = 6;
+}
+
+enum SwipeDirection {
+  SWIPE_DIRECTION_UNSPECIFIED = 0;
+  UP = 1;
+  DOWN = 2;
+  SWIPE_LEFT = 3;
+  SWIPE_RIGHT = 4;
+}
+
+message TouchPoint {
+  uint32 touch_id = 1;
+  double x = 2;
+  double y = 3;
+  double pressure = 4;
+  double major_radius = 5;
+}
+
+// ============================================================
+// Trackpad Configuration
+// ============================================================
+
+message TrackpadConfig {
+  double cursor_speed = 1;         // Multiplier [0.1, 5.0]
+  double scroll_speed = 2;         // Multiplier [0.1, 5.0]
+  bool natural_scrolling = 3;
+  bool tap_to_click = 4;
+  double pinch_sensitivity = 5;
+  bool three_finger_drag = 6;
+  // Gesture zone mapping
+  GestureZoneConfig gesture_zones = 7;
+}
+
+message GestureZoneConfig {
+  // Which edge gestures are enabled
+  bool edge_swipe_left = 1;
+  bool edge_swipe_right = 2;
+  bool edge_swipe_top = 3;
+  bool edge_swipe_bottom = 4;
+}

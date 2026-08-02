@@ -1,0 +1,138 @@
+// LinkOS Terminal Protocol
+// Handles interactive terminal sessions and SSH.
+
+syntax = "proto3";
+package linkos.terminal;
+
+option java_package = "com.linkos.core.protocol.generated";
+option java_multiple_files = true;
+option swift_prefix = "LOS";
+
+// ============================================================
+// Terminal Sessions
+// ============================================================
+
+message TerminalSessionRequest {
+  TerminalType type = 1;
+  string shell = 2;              // e.g., "/bin/zsh", "/bin/bash"
+  string working_directory = 3;
+  map<string, string> environment = 4;
+  TerminalSize size = 5;
+  // SSH-specific
+  SSHConfig ssh_config = 6;
+}
+
+message TerminalSessionResponse {
+  string session_id = 1;
+  bool success = 2;
+  string error_message = 3;
+}
+
+enum TerminalType {
+  TERMINAL_TYPE_UNSPECIFIED = 0;
+  LOCAL_SHELL = 1;
+  SSH = 2;
+}
+
+message SSHConfig {
+  string host = 1;
+  uint32 port = 2;
+  string username = 3;
+  SSHAuthMethod auth_method = 4;
+  string password = 5;          // Encrypted
+  string private_key_path = 6;
+  string passphrase = 7;       // For encrypted keys
+}
+
+enum SSHAuthMethod {
+  SSH_AUTH_UNSPECIFIED = 0;
+  PASSWORD = 1;
+  PUBLIC_KEY = 2;
+  AGENT = 3;
+}
+
+// ============================================================
+// Terminal I/O
+// ============================================================
+
+// Input from Android to macOS terminal
+message TerminalInput {
+  string session_id = 1;
+  bytes data = 2;               // Raw terminal input bytes
+}
+
+// Output from macOS terminal to Android
+message TerminalOutput {
+  string session_id = 1;
+  bytes data = 2;               // Raw terminal output bytes (ANSI encoded)
+}
+
+// ============================================================
+// Terminal Control
+// ============================================================
+
+message TerminalResize {
+  string session_id = 1;
+  TerminalSize size = 2;
+}
+
+message TerminalSize {
+  uint32 cols = 1;
+  uint32 rows = 2;
+  uint32 pixel_width = 3;
+  uint32 pixel_height = 4;
+}
+
+message TerminalControl {
+  string session_id = 1;
+  TerminalAction action = 2;
+}
+
+enum TerminalAction {
+  TERMINAL_ACTION_UNSPECIFIED = 0;
+  CLOSE = 1;
+  SIGNAL_INT = 2;       // Ctrl+C
+  SIGNAL_EOF = 3;       // Ctrl+D
+  SIGNAL_SUSPEND = 4;   // Ctrl+Z
+  CLEAR = 5;
+}
+
+// ============================================================
+// Session Management
+// ============================================================
+
+message TerminalSessionListRequest {}
+
+message TerminalSessionListResponse {
+  repeated TerminalSessionInfo sessions = 1;
+}
+
+message TerminalSessionInfo {
+  string session_id = 1;
+  TerminalType type = 2;
+  string title = 3;           // Current terminal title
+  string shell = 4;
+  uint64 created_at = 5;
+  bool is_active = 6;
+  TerminalSize size = 7;
+}
+
+// ============================================================
+// Command History
+// ============================================================
+
+message CommandHistoryRequest {
+  uint32 limit = 1;
+  string search_query = 2;
+}
+
+message CommandHistoryResponse {
+  repeated CommandHistoryEntry entries = 1;
+}
+
+message CommandHistoryEntry {
+  string command = 1;
+  uint64 timestamp = 2;
+  string working_directory = 3;
+  int32 exit_code = 4;
+}
