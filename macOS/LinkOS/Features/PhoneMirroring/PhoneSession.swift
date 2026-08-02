@@ -305,15 +305,10 @@ final class PhoneSession: ObservableObject {
     // MARK: - Private Transport Helper
     
     private func sendControlMessage(_ payload: [String: Any]) async {
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let jsonString = String(data: data, encoding: .utf8) else {
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
             return
         }
-        
-        if let connection = await WebSocketServer.shared.activeConnectedDeviceConnection {
-            let envelope = MessageRouter.createEvent(channel: "phone", payload: data)
-            try? await connection.send(envelope)
-        }
+        await ConnectionStateManager.shared.routeMessage(channel: .phone, payload: data, from: DeviceIdentity.deviceId)
     }
 
     // MARK: - AI Agent Screen Context API

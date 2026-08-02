@@ -74,7 +74,11 @@ final class PhoneWindowController: NSWindowController, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         
         Task {
-            await PhoneSession.shared.resumeSession()
+            if !PhoneSession.shared.isStreaming {
+                await PhoneSession.shared.startSession()
+            } else {
+                await PhoneSession.shared.resumeSession()
+            }
         }
     }
     
