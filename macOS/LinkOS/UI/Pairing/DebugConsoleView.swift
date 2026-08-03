@@ -114,7 +114,12 @@ struct DebugConsoleView: View {
                 Spacer()
                 
                 Button("Close") {
-                    NSApp.keyWindow?.close()
+                    for window in NSApplication.shared.windows {
+                        if window.title == "LinkOS Developer Console" {
+                            window.close()
+                            break
+                        }
+                    }
                 }
                 .keyboardShortcut(.cancelAction)
             }

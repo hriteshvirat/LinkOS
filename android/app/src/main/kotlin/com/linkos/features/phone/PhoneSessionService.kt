@@ -205,6 +205,15 @@ class PhoneSessionService : Service() {
             }
         }
         
+        // Prevent duplicate capture sessions by stopping any active session first
+        if (mediaCodec != null || virtualDisplay != null) {
+            LinkOSLogger.warning("[PhoneMirroring] Capture session is already active. Releasing active session first to prevent conflicts.", "PhoneMirroring")
+            val oldCodecId = System.identityHashCode(mediaCodec)
+            val oldDisplayId = System.identityHashCode(virtualDisplay)
+            LinkOSLogger.warning("[PhoneMirroring] Releasing old codec ID: $oldCodecId, display ID: $oldDisplayId", "PhoneMirroring")
+            stopCapture()
+        }
+
         try {
             // Check hardware support, fallback to software Google AVC encoder if needed
             val tempCodec = try {
@@ -216,7 +225,9 @@ class PhoneSessionService : Service() {
                 MediaCodec.createByCodecName("OMX.google.h264.encoder")
             }
             mediaCodec = tempCodec
-            sendDiagnosticStatus("encoder_initialized", true)
+            
+            val newCodecId = System.identityHashCode(mediaCodec)
+            LinkOSLogger.info("[PhoneMirroring] New codec object identity: $newCodecId", "PhoneMirroring")
             
             // Setup MediaCodec asynchronous callback before calling codec.start()
             mediaCodec?.setCallback(object : MediaCodec.Callback() {
@@ -275,15 +286,23 @@ class PhoneSessionService : Service() {
                 }
             })
             
-            // Create input surface BEFORE configuring and starting the encoder
-            inputSurface = mediaCodec?.createInputSurface()
-            LinkOSLogger.info("[PhoneMirroring] (PASS) Input surface created successfully", "PhoneMirroring")
-            
+            // 1. Configure the encoder (Transitions state from Uninitialized to Configured)
+            LinkOSLogger.info("[PhoneMirroring] Calling configure()", "PhoneMirroring")
             mediaCodec?.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             LinkOSLogger.info("[PhoneMirroring] (PASS) Codec configured successfully", "PhoneMirroring")
             
+            // 2. Create the input surface (Transitions state to Configured)
+            LinkOSLogger.info("[PhoneMirroring] Calling createInputSurface()", "PhoneMirroring")
+            inputSurface = mediaCodec?.createInputSurface()
+            LinkOSLogger.info("[PhoneMirroring] (PASS) Input surface created successfully", "PhoneMirroring")
+            
+            // 3. Start the encoder
+            LinkOSLogger.info("[PhoneMirroring] Calling start()", "PhoneMirroring")
             mediaCodec?.start()
             LinkOSLogger.info("[PhoneMirroring] (PASS) Codec started successfully", "PhoneMirroring")
+            
+            // Send success states only after successful completion of all initialization steps
+            sendDiagnosticStatus("encoder_initialized", true)
             sendDiagnosticStatus("encoder_started", true)
             
         } catch (e: Exception) {
