@@ -16,6 +16,10 @@ import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.media.ImageReader
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
+import android.view.Surface
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
@@ -44,7 +48,8 @@ class PhoneSessionService : Service() {
     
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
-    private var imageReader: ImageReader? = null
+    private var mediaCodec: MediaCodec? = null
+    private var inputSurface: Surface? = null
     
     private var backgroundThread: HandlerThread? = null
     private var backgroundHandler: Handler? = null
@@ -185,94 +190,136 @@ class PhoneSessionService : Service() {
             }
         }
         
+        // Ensure dimensions are even (required by H.264 encoders)
+        targetWidth = (targetWidth shr 1) shl 1
+        targetHeight = (targetHeight shr 1) shl 1
+        
+        val mimeType = MediaFormat.MIMETYPE_VIDEO_AVC
+        val format = MediaFormat.createVideoFormat(mimeType, targetWidth, targetHeight).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+            setInteger(MediaFormat.KEY_BIT_RATE, 2_000_000) // 2 Mbps
+            setInteger(MediaFormat.KEY_FRAME_RATE, 30)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // 1 second keyframe interval
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                setInteger(MediaFormat.KEY_LATENCY, 1) // Real-time low latency
+            }
+        }
+        
         try {
-            imageReader = ImageReader.newInstance(targetWidth, targetHeight, PixelFormat.RGBA_8888, 2)
+            // Check hardware support, fallback to software Google AVC encoder if needed
+            val tempCodec = try {
+                MediaCodec.createEncoderByType(mimeType).also {
+                    LinkOSLogger.info("[PhoneMirroring] (PASS) MediaCodec created successfully using type $mimeType: name=${it.name}", "PhoneMirroring")
+                }
+            } catch (e: Exception) {
+                LinkOSLogger.warning("[PhoneMirroring] Hardware encoder creation failed, falling back to software codec OMX.google.h264.encoder: ${e.message}", "PhoneMirroring")
+                MediaCodec.createByCodecName("OMX.google.h264.encoder")
+            }
+            mediaCodec = tempCodec
+            sendDiagnosticStatus("encoder_initialized", true)
             
+            // Setup MediaCodec asynchronous callback before calling codec.start()
+            mediaCodec?.setCallback(object : MediaCodec.Callback() {
+                override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
+                    // Not used since we use Surface input
+                }
+
+                override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
+                    if (isPaused) {
+                        try {
+                            codec.releaseOutputBuffer(index, false)
+                        } catch (e: Exception) {}
+                        return
+                    }
+                    try {
+                        val buffer = codec.getOutputBuffer(index)
+                        if (buffer != null && info.size > 0) {
+                            buffer.position(info.offset)
+                            buffer.limit(info.offset + info.size)
+                            
+                            val bytes = ByteArray(info.size)
+                            buffer.get(bytes)
+                            
+                            // Log SPS/PPS or Keyframe state transitions
+                            if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                                if (!hasReceivedFirstFrame) {
+                                    LinkOSLogger.info("[PhoneMirroring] (PASS) First SPS/PPS configuration buffer produced by encoder: size=${info.size} bytes", "PhoneMirroring")
+                                    sendDiagnosticStatus("first_sps_pps", true)
+                                }
+                            } else {
+                                if (!hasSentFirstEncoderStatus) {
+                                    LinkOSLogger.info("[PhoneMirroring] (PASS) First H.264 video frame produced by encoder: size=${info.size} bytes", "PhoneMirroring")
+                                    sendDiagnosticStatus("encoder", true)
+                                    sendDiagnosticStatus("first_frame", true)
+                                    hasSentFirstEncoderStatus = true
+                                    hasReceivedFirstFrame = true
+                                }
+                            }
+                            
+                            // Send H.264 bytes to Mac WebSocket
+                            webSocketClient.send(bytes)
+                        }
+                        codec.releaseOutputBuffer(index, false)
+                    } catch (e: Exception) {
+                        LinkOSLogger.error("[PhoneMirroring] Error processing codec output buffer: ${e.message}", "PhoneMirroring")
+                    }
+                }
+
+                override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
+                    LinkOSLogger.error("[PhoneMirroring] (FAIL) MediaCodec error callback: isTransient=${e.isTransient}, isRecoverable=${e.isRecoverable}, message=${e.message}", "PhoneMirroring")
+                    sendDiagnosticStatus("encoder", false, "MediaCodec error: ${e.message}")
+                }
+
+                override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
+                    LinkOSLogger.info("[PhoneMirroring] MediaCodec output format changed: $format", "PhoneMirroring")
+                }
+            })
+            
+            // Create input surface BEFORE configuring and starting the encoder
+            inputSurface = mediaCodec?.createInputSurface()
+            LinkOSLogger.info("[PhoneMirroring] (PASS) Input surface created successfully", "PhoneMirroring")
+            
+            mediaCodec?.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            LinkOSLogger.info("[PhoneMirroring] (PASS) Codec configured successfully", "PhoneMirroring")
+            
+            mediaCodec?.start()
+            LinkOSLogger.info("[PhoneMirroring] (PASS) Codec started successfully", "PhoneMirroring")
+            sendDiagnosticStatus("encoder_started", true)
+            
+        } catch (e: Exception) {
+            val errorMsg = e.message ?: e.toString()
+            LinkOSLogger.error("[PhoneMirroring] (FAIL) Exception during MediaCodec creation/configuration: $errorMsg", "PhoneMirroring")
+            sendDiagnosticStatus("encoder_initialized", false, "MediaCodec setup failed: $errorMsg")
+            
+            // Print full telemetry metrics as requested
+            LinkOSLogger.error("[PhoneMirroring] TELEMETRY - Device: ${Build.MANUFACTURER} ${Build.MODEL}, OS: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), Codec: $mimeType, Resolution: ${targetWidth}x${targetHeight}, Bitrate: 2000000, FPS: 30", "PhoneMirroring")
+            e.printStackTrace()
+            return
+        }
+        
+        try {
             virtualDisplay = mediaProjection?.createVirtualDisplay(
                 "PhoneMirroringDisplay",
                 targetWidth,
                 targetHeight,
                 dpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader?.surface,
+                inputSurface, // Directly bind VirtualDisplay to the MediaCodec input surface!
                 null,
                 backgroundHandler
             )
             
             if (virtualDisplay != null) {
-                LinkOSLogger.info("[PhoneMirroring] (PASS) VirtualDisplay created successfully: width=$targetWidth, height=$targetHeight, dpi=$dpi", "PhoneMirroring")
+                LinkOSLogger.info("[PhoneMirroring] (PASS) VirtualDisplay created and attached to MediaCodec input surface successfully", "PhoneMirroring")
                 sendDiagnosticStatus("frame_capture", true)
             } else {
                 sendDiagnosticStatus("frame_capture", false, "VirtualDisplay is null")
             }
         } catch (e: Exception) {
-            sendDiagnosticStatus("frame_capture", false, "Failed to build capture components: ${e.message}")
-            LinkOSLogger.error("[PhoneMirroring] (FAIL) Failed to build capture components: ${e.message}", "PhoneMirroring")
+            sendDiagnosticStatus("frame_capture", false, "Failed to create VirtualDisplay: ${e.message}")
+            LinkOSLogger.error("[PhoneMirroring] (FAIL) Failed to create VirtualDisplay: ${e.message}", "PhoneMirroring")
             return
         }
-        
-        imageReader?.setOnImageAvailableListener({ reader ->
-            if (isPaused) {
-                reader.acquireLatestImage()?.close()
-                return@setOnImageAvailableListener
-            }
-            
-            if (isSendingFrame) {
-                reader.acquireLatestImage()?.close()
-                return@setOnImageAvailableListener
-            }
-            
-            val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-            if (!hasReceivedFirstFrame) {
-                LinkOSLogger.info("[PhoneMirroring] (PASS) ImageReader received first frame image!", "PhoneMirroring")
-                hasReceivedFirstFrame = true
-            }
-            isSendingFrame = true
-            
-            serviceScope.launch {
-                try {
-                    val plane = image.planes[0]
-                    val buffer = plane.buffer
-                    val pixelStride = plane.pixelStride
-                    val rowStride = plane.rowStride
-                    val rowPadding = rowStride - pixelStride * image.width
-                    
-                    val bitmap = Bitmap.createBitmap(
-                        image.width + rowPadding / pixelStride,
-                        image.height,
-                        Bitmap.Config.ARGB_8888
-                    )
-                    bitmap.copyPixelsFromBuffer(buffer)
-                    image.close()
-                    
-                    val croppedBitmap = Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
-                    val jpegBytes = frameEncoder.encode(croppedBitmap)
-                    
-                    if (jpegBytes != null) {
-                        if (!hasSentFirstEncoderStatus) {
-                            LinkOSLogger.info("[PhoneMirroring] (PASS) Frame #1 successfully encoded: size=${jpegBytes.size} bytes", "PhoneMirroring")
-                            sendDiagnosticStatus("encoder", true)
-                            hasSentFirstEncoderStatus = true
-                        }
-                        webSocketClient.send(jpegBytes)
-                        if (hasSentFirstEncoderStatus && jpegBytes.size > 0 && hasReceivedFirstFrame) {
-                            // Print log only once for Frame #1
-                            LinkOSLogger.info("[PhoneMirroring] (PASS) Frame #1 sent over raw WebSocket", "PhoneMirroring")
-                        }
-                    } else {
-                        if (!hasSentFirstEncoderStatus) {
-                            LinkOSLogger.error("[PhoneMirroring] (FAIL) Frame encoder returned null/failed on first frame", "PhoneMirroring")
-                            sendDiagnosticStatus("encoder", false, "Frame encoder returned null bytes")
-                        }
-                    }
-                } catch (e: Exception) {
-                    LinkOSLogger.error("Failed to process phone mirror frame: ${e.message}", "PhoneMirroring")
-                    image.close()
-                } finally {
-                    isSendingFrame = false
-                }
-            }
-        }, backgroundHandler)
         
         mediaProjection?.let {
             startAudioCapture(it)
@@ -396,8 +443,15 @@ class PhoneSessionService : Service() {
         stopMicPlayback()
         virtualDisplay?.release()
         virtualDisplay = null
-        imageReader?.close()
-        imageReader = null
+        try {
+            mediaCodec?.stop()
+        } catch (e: Exception) {}
+        try {
+            mediaCodec?.release()
+        } catch (e: Exception) {}
+        mediaCodec = null
+        inputSurface?.release()
+        inputSurface = null
         mediaProjection?.stop()
         mediaProjection = null
     }

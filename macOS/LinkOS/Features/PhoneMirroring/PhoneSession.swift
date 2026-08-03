@@ -3,6 +3,8 @@ import Combine
 import AppKit
 import CoreGraphics
 import Vision
+import VideoToolbox
+import CoreMedia
 
 enum PhoneConnectionState {
     case disconnected
@@ -15,6 +17,7 @@ enum DiagnosticStageStatus: Equatable {
     case pending
     case success
     case failure(String)
+    case inProgress(String)
 }
 
 @MainActor
@@ -45,6 +48,7 @@ final class PhoneSession: ObservableObject {
     private var lastFrameTime = Date()
     private var frameCount = 0
     private var fpsTimer: Timer?
+    private let h264Decoder = H264Decoder()
     
     private init() {
         // Calculate FPS periodically
@@ -53,6 +57,21 @@ final class PhoneSession: ObservableObject {
             Task { @MainActor in
                 self.fps = Double(self.frameCount)
                 self.frameCount = 0
+            }
+        }
+        
+        h264Decoder.onFrameDecoded = { [weak self] cgImage in
+            guard let self = self else { return }
+            Task { @MainActor in
+                if self.decoderStatus != .success {
+                    LinkOSLogger.shared.info("[PhoneSession] (PASS) Frame #1 successfully decoded on Mac", category: .media)
+                    self.decoderStatus = .success
+                }
+                self.currentFrame = cgImage
+                if self.rendererStatus != .success {
+                    LinkOSLogger.shared.info("[PhoneSession] (PASS) Renderer updated with currentFrame", category: .media)
+                    self.rendererStatus = .success
+                }
             }
         }
     }
@@ -90,8 +109,22 @@ final class PhoneSession: ObservableObject {
             mediaProjectionStatus = status
         case "frame_capture":
             frameCaptureStatus = status
+        case "encoder_initialized":
+            encoderStatus = ok ? .inProgress("Encoder Initialized") : .failure(error)
+        case "encoder_started":
+            encoderStatus = ok ? .inProgress("Encoder Started") : .failure(error)
+        case "first_sps_pps":
+            encoderStatus = ok ? .inProgress("First SPS/PPS Received") : .failure(error)
+        case "first_frame":
+            encoderStatus = ok ? .inProgress("First Frame Received") : .failure(error)
         case "encoder":
             encoderStatus = status
+        case "network":
+            networkStatus = status
+        case "decoder":
+            decoderStatus = status
+        case "renderer":
+            rendererStatus = status
         default:
             break
         }
@@ -205,42 +238,16 @@ final class PhoneSession: ObservableObject {
         self.latencyMs = (self.latencyMs * 0.9) + (calcLatency * 0.1) // Smooth latency jitter
         
         // Mark network connection payload received
-        if networkStatus == .pending {
+        if networkStatus != .success {
             DispatchQueue.main.async {
                 LinkOSLogger.shared.info("[PhoneSession] (PASS) First raw frame packet received on Mac: size=\(data.count) bytes", category: .media)
                 self.networkStatus = .success
             }
         }
         
-        // Decode JPEG frame asynchronously on background queue
+        // Decode H.264 Annex B frame asynchronously on background queue
         DispatchQueue.global(qos: .userInteractive).async {
-            guard let cgDataProvider = CGDataProvider(data: data as CFData),
-                  let cgImage = CGImage(
-                      jpegDataProviderSource: cgDataProvider,
-                      decode: nil,
-                      shouldInterpolate: false,
-                      intent: .defaultIntent
-                  ) else {
-                DispatchQueue.main.async {
-                    if self.decoderStatus == .pending {
-                        LinkOSLogger.shared.error("[PhoneSession] (FAIL) Failed to decode first frame", category: .media)
-                        self.decoderStatus = .failure("JPEG Decoding failed")
-                    }
-                }
-                return
-            }
-            
-            DispatchQueue.main.async {
-                if self.decoderStatus == .pending {
-                    LinkOSLogger.shared.info("[PhoneSession] (PASS) Frame #1 successfully decoded on Mac", category: .media)
-                    self.decoderStatus = .success
-                }
-                self.currentFrame = cgImage
-                if self.rendererStatus == .pending {
-                    LinkOSLogger.shared.info("[PhoneSession] (PASS) Renderer updated with currentFrame", category: .media)
-                    self.rendererStatus = .success
-                }
-            }
+            self.h264Decoder.decode(data)
         }
     }
     
@@ -375,6 +382,208 @@ final class PhoneSession: ObservableObject {
             } catch {
                 continuation.resume(returning: "Failed to perform text recognition: \(error.localizedDescription)")
             }
+        }
+    }
+}
+
+class H264Decoder: @unchecked Sendable {
+    private var decompressionSession: VTDecompressionSession?
+    private var formatDescription: CMVideoFormatDescription?
+    private let decodeQueue = DispatchQueue(label: "com.linkos.h264decoder")
+    
+    var onFrameDecoded: ((CGImage) -> Void)?
+    
+    func decode(_ data: Data) {
+        decodeQueue.async { [weak self] in
+            guard let self = self else { return }
+            var naluRanges = [Range<Int>]()
+            var index = 0
+            let bytes = [UInt8](data)
+            let len = bytes.count
+            
+            while index < len - 4 {
+                if bytes[index] == 0 && bytes[index+1] == 0 && bytes[index+2] == 0 && bytes[index+3] == 1 {
+                    let start = index + 4
+                    var end = len
+                    var next = start
+                    while next < len - 3 {
+                        if bytes[next] == 0 && bytes[next+1] == 0 && bytes[next+2] == 0 && bytes[next+3] == 1 {
+                            end = next
+                            break
+                        }
+                        if bytes[next] == 0 && bytes[next+1] == 0 && bytes[next+2] == 1 {
+                            end = next
+                            break
+                        }
+                        next += 1
+                    }
+                    naluRanges.append(start..<end)
+                    index = end
+                } else if bytes[index] == 0 && bytes[index+1] == 0 && bytes[index+2] == 1 {
+                    let start = index + 3
+                    var end = len
+                    var next = start
+                    while next < len - 3 {
+                        if bytes[next] == 0 && bytes[next+1] == 0 && bytes[next+2] == 0 && bytes[next+3] == 1 {
+                            end = next
+                            break
+                        }
+                        if bytes[next] == 0 && bytes[next+1] == 0 && bytes[next+2] == 1 {
+                            end = next
+                            break
+                        }
+                        next += 1
+                    }
+                    naluRanges.append(start..<end)
+                    index = end
+                } else {
+                    index += 1
+                }
+            }
+            
+            var sps: Data?
+            var pps: Data?
+            var videoFrames = [Data]()
+            
+            for range in naluRanges {
+                let nalu = data.subdata(in: range)
+                guard !nalu.isEmpty else { continue }
+                let type = nalu[0] & 0x1F
+                
+                if type == 7 {
+                    sps = nalu
+                } else if type == 8 {
+                    pps = nalu
+                } else if type == 5 || type == 1 {
+                    videoFrames.append(nalu)
+                }
+            }
+            
+            if let spsData = sps, let ppsData = pps {
+                self.createFormatDescription(sps: spsData, pps: ppsData)
+            }
+            
+            guard let formatDesc = self.formatDescription, let session = self.decompressionSession else { return }
+            
+            for frame in videoFrames {
+                var naluLength = UInt32(frame.count).bigEndian
+                var blockBuffer: CMBlockBuffer?
+                
+                var status = CMBlockBufferCreateWithMemoryBlock(
+                    allocator: kCFAllocatorDefault,
+                    memoryBlock: nil,
+                    blockLength: frame.count + 4,
+                    blockAllocator: kCFAllocatorDefault,
+                    customBlockSource: nil,
+                    offsetToData: 0,
+                    dataLength: frame.count + 4,
+                    flags: 0,
+                    blockBufferOut: &blockBuffer
+                )
+                
+                guard status == noErr, let buffer = blockBuffer else { continue }
+                
+                status = CMBlockBufferReplaceDataBytes(with: &naluLength, blockBuffer: buffer, offsetIntoDestination: 0, dataLength: 4)
+                guard status == noErr else { continue }
+                
+                let frameBytes = [UInt8](frame)
+                status = CMBlockBufferReplaceDataBytes(with: frameBytes, blockBuffer: buffer, offsetIntoDestination: 4, dataLength: frame.count)
+                guard status == noErr else { continue }
+                
+                var sampleBuffer: CMSampleBuffer?
+                status = CMSampleBufferCreateReady(
+                    allocator: kCFAllocatorDefault,
+                    dataBuffer: buffer,
+                    formatDescription: formatDesc,
+                    sampleCount: 1,
+                    sampleTimingEntryCount: 0,
+                    sampleTimingArray: nil,
+                    sampleSizeEntryCount: 0,
+                    sampleSizeArray: nil,
+                    sampleBufferOut: &sampleBuffer
+                )
+                
+                guard status == noErr, let sb = sampleBuffer else { continue }
+                
+                var flagsOut = VTDecodeInfoFlags()
+                status = VTDecompressionSessionDecodeFrame(
+                    session,
+                    sampleBuffer: sb,
+                    flags: [._EnableAsynchronousDecompression],
+                    frameRefcon: nil,
+                    infoFlagsOut: &flagsOut
+                )
+            }
+        }
+    }
+    
+    private func createFormatDescription(sps: Data, pps: Data) {
+        let spsPointer = sps.withUnsafeBytes { $0.baseAddress?.assumingMemoryBound(to: UInt8.self) }
+        let ppsPointer = pps.withUnsafeBytes { $0.baseAddress?.assumingMemoryBound(to: UInt8.self) }
+        
+        guard let spsPtr = spsPointer, let ppsPtr = ppsPointer else { return }
+        
+        let parameterSetPointers = [spsPtr, ppsPtr]
+        let parameterSetSizes = [sps.count, pps.count]
+        
+        var formatDesc: CMVideoFormatDescription?
+        let status = CMVideoFormatDescriptionCreateFromH264ParameterSets(
+            allocator: kCFAllocatorDefault,
+            parameterSetCount: 2,
+            parameterSetPointers: parameterSetPointers,
+            parameterSetSizes: parameterSetSizes,
+            nalUnitHeaderLength: 4,
+            formatDescriptionOut: &formatDesc
+        )
+        
+        guard status == noErr, let desc = formatDesc else { return }
+        self.formatDescription = desc
+        
+        if decompressionSession != nil {
+            VTDecompressionSessionInvalidate(decompressionSession!)
+            decompressionSession = nil
+        }
+        
+        let decoderSpecification: CFDictionary? = nil
+        let destinationImageBufferAttributes: CFDictionary = [
+            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferOpenGLCompatibilityKey: true,
+            kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary
+        ] as CFDictionary
+        
+        var outputCallback = VTDecompressionOutputCallbackRecord(
+            decompressionOutputCallback: { (decompressionRefCon, sourceFrameRefCon, status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration) in
+                guard status == noErr, let pixelBuffer = imageBuffer else { return }
+                
+                var cgImage: CGImage?
+                VTCreateCGImageFromCVPixelBuffer(pixelBuffer, options: nil, imageOut: &cgImage)
+                
+                if let cgImg = cgImage, let decoder = decompressionRefCon {
+                    let decoderObject = Unmanaged<H264Decoder>.fromOpaque(decoder).takeUnretainedValue()
+                    decoderObject.onFrameDecoded?(cgImg)
+                }
+            },
+            decompressionOutputRefCon: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        )
+        
+        var session: VTDecompressionSession?
+        let sessionStatus = VTDecompressionSessionCreate(
+            allocator: kCFAllocatorDefault,
+            formatDescription: desc,
+            decoderSpecification: decoderSpecification,
+            imageBufferAttributes: destinationImageBufferAttributes,
+            outputCallback: &outputCallback,
+            decompressionSessionOut: &session
+        )
+        
+        if sessionStatus == noErr {
+            self.decompressionSession = session
+        }
+    }
+    
+    deinit {
+        if let session = decompressionSession {
+            VTDecompressionSessionInvalidate(session)
         }
     }
 }

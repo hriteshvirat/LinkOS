@@ -526,6 +526,15 @@ struct DiagnosticRow: View {
                         .font(.system(.body, design: .rounded))
                         .foregroundColor(.red)
                 }
+            case .inProgress(let statusText):
+                HStack(spacing: 4) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .orange))
+                        .scaleEffect(0.6)
+                    Text(statusText)
+                        .font(.system(.body, design: .rounded))
+                        .foregroundColor(.orange)
+                }
             }
         }
     }
@@ -570,6 +579,15 @@ struct DevDiagnosticRow: View {
                         .foregroundColor(.red)
                 }
                 .help(error)
+            case .inProgress(let statusText):
+                HStack(spacing: 4) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .orange))
+                        .scaleEffect(0.5)
+                    Text(statusText)
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundColor(.orange)
+                }
             }
         }
     }
