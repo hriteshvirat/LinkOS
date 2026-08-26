@@ -429,11 +429,9 @@ final class FileSystemPlugin: LinkOSPlugin {
                     let response = MessageRouter.createResponse(channel: "files", payload: errPayload, correlationId: message.correlationId)
                     try? await connectionManager?.send(response, to: message.deviceId)
                     
-                    self.downloadCompletionsLock.lock()
-                    if let continuation = self.downloadCompletions.removeValue(forKey: transferId) {
-                        continuation.resume(throwing: error)
+                    self.downloadCompletionsLock.withLock {
+                        self.downloadCompletions[transferId] = nil
                     }
-                    self.downloadCompletionsLock.unlock()
                     self.transferIsCopy.removeValue(forKey: transferId)
                     self.transferIsDragOrPreview.removeValue(forKey: transferId)
                     
@@ -709,11 +707,10 @@ final class FileSystemPlugin: LinkOSPlugin {
                 for try await (_, sentBytes) in group {
                     completedCount += 1
                     
-                    bytesTransferredLock.lock()
-                    bytesTransferred += Int64(sentBytes)
-                    let currentProgress = bytesTransferred
-                    bytesTransferredLock.unlock()
-                    
+                    let currentProgress: Int64 = bytesTransferredLock.withLock {
+                        bytesTransferred += Int64(sentBytes)
+                        return bytesTransferred
+                    }
                     let progressRatio = Double(completedCount) / Double(totalChunks)
                     let statusVal = (completedCount == totalChunks) ? "completed" : "transferring"
                     

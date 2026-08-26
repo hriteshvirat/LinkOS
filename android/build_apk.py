@@ -12,7 +12,7 @@ def main():
     env["PATH"] = f"{java_home}/bin:{env.get('PATH', '')}"
 
     print("Building real LinkOS Android APK via Gradle...")
-    cmd = ["./gradlew", "assembleDebug"]
+    cmd = ["./gradlew", "clean", "assembleDebug"]
     res = subprocess.run(cmd, cwd=android_dir, env=env)
 
     if res.returncode != 0:

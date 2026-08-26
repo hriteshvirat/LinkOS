@@ -32,32 +32,32 @@ final class LinkOSLogger {
     
     // MARK: - Public API
     
-    func debug(_ message: String, category: LogCategory, metadata: [String: String]? = nil) {
-        log(level: .debug, message: message, category: category, metadata: metadata)
+    func debug(_ message: String, category: LogCategory, metadata: [String: String]? = nil, sessionId: String? = nil) {
+        log(level: .debug, message: message, category: category, metadata: metadata, sessionId: sessionId)
     }
     
-    func info(_ message: String, category: LogCategory, metadata: [String: String]? = nil) {
-        log(level: .info, message: message, category: category, metadata: metadata)
+    func info(_ message: String, category: LogCategory, metadata: [String: String]? = nil, sessionId: String? = nil) {
+        log(level: .info, message: message, category: category, metadata: metadata, sessionId: sessionId)
     }
     
-    func warning(_ message: String, category: LogCategory, metadata: [String: String]? = nil) {
-        log(level: .warning, message: message, category: category, metadata: metadata)
+    func warning(_ message: String, category: LogCategory, metadata: [String: String]? = nil, sessionId: String? = nil) {
+        log(level: .warning, message: message, category: category, metadata: metadata, sessionId: sessionId)
     }
     
-    func error(_ message: String, category: LogCategory, error: Error? = nil, metadata: [String: String]? = nil) {
+    func error(_ message: String, category: LogCategory, error: Error? = nil, metadata: [String: String]? = nil, sessionId: String? = nil) {
         var meta = metadata ?? [:]
         if let error = error {
             meta["error"] = String(describing: error)
         }
-        log(level: .error, message: message, category: category, metadata: meta)
+        log(level: .error, message: message, category: category, metadata: meta, sessionId: sessionId)
     }
     
-    func critical(_ message: String, category: LogCategory, error: Error? = nil, metadata: [String: String]? = nil) {
+    func critical(_ message: String, category: LogCategory, error: Error? = nil, metadata: [String: String]? = nil, sessionId: String? = nil) {
         var meta = metadata ?? [:]
         if let error = error {
             meta["error"] = String(describing: error)
         }
-        log(level: .critical, message: message, category: category, metadata: meta)
+        log(level: .critical, message: message, category: category, metadata: meta, sessionId: sessionId)
     }
     
     /// Export logs as JSON for bug reports. Sanitizes sensitive data.
@@ -70,7 +70,7 @@ final class LinkOSLogger {
     
     // MARK: - Private
     
-    private func log(level: LogLevel, message: String, category: LogCategory, metadata: [String: String]?) {
+    private func log(level: LogLevel, message: String, category: LogCategory, metadata: [String: String]?, sessionId: String? = nil) {
         // Level filtering
         guard level.numericValue >= minimumLevel.numericValue else { return }
         
@@ -79,26 +79,49 @@ final class LinkOSLogger {
             return
         }
         
+        // Extract Thread Name
+        var threadName = "Unknown"
+        if Thread.isMainThread {
+            threadName = "Main"
+        } else if let name = Thread.current.name, !name.isEmpty {
+            threadName = name
+        } else if let queueLabel = String(validatingUTF8: __dispatch_queue_get_label(nil)), !queueLabel.isEmpty {
+            threadName = queueLabel
+        }
+        
+        // Format explicit prefixes
+        var prefixes = "[\(threadName)]"
+        if let sessionId = sessionId, !sessionId.isEmpty {
+            prefixes += " [\(sessionId)]"
+        }
+        let formattedMessage = "\(prefixes) \(message)"
+        
         let osLog = OSLog(subsystem: subsystem, category: category.rawValue)
+        var finalMetadata = metadata ?? [:]
+        finalMetadata["thread"] = threadName
+        if let sid = sessionId {
+            finalMetadata["sessionId"] = sid
+        }
+        
         let entry = LogEntry(
             timestamp: Date(),
             level: level,
             category: category,
-            message: message,
-            metadata: metadata
+            message: formattedMessage,
+            metadata: finalMetadata
         )
         
         // Apple unified logging
         switch level {
-        case .debug:    os_log(.debug, log: osLog, "%{public}@", message)
-        case .info:     os_log(.info, log: osLog, "%{public}@", message)
-        case .warning:  os_log(.default, log: osLog, "⚠️ %{public}@", message)
-        case .error:    os_log(.error, log: osLog, "%{public}@", message)
-        case .critical: os_log(.fault, log: osLog, "%{public}@", message)
+        case .debug:    os_log(.debug, log: osLog, "%{public}@", formattedMessage)
+        case .info:     os_log(.info, log: osLog, "%{public}@", formattedMessage)
+        case .warning:  os_log(.default, log: osLog, "⚠️ %{public}@", formattedMessage)
+        case .error:    os_log(.error, log: osLog, "%{public}@", formattedMessage)
+        case .critical: os_log(.fault, log: osLog, "%{public}@", formattedMessage)
         }
         
         // Also print to stderr for real-time command-line diagnostics
-        fputs("[\(level.rawValue.uppercased())] [\(category.rawValue)] \(message)\n", stderr)
+        fputs("[\(level.rawValue.uppercased())] [\(category.rawValue)] \(formattedMessage)\n", stderr)
         
         // Buffer for export
         bufferQueue.async { [weak self] in

@@ -114,10 +114,12 @@ struct DebugConsoleView: View {
                 Spacer()
                 
                 Button("Close") {
-                    for window in NSApplication.shared.windows {
-                        if window.title == "LinkOS Developer Console" {
-                            window.close()
-                            break
+                    DispatchQueue.main.async {
+                        for window in NSApplication.shared.windows {
+                            if window.title == "LinkOS Developer Console" {
+                                window.close()
+                                break
+                            }
                         }
                     }
                 }

@@ -76,6 +76,7 @@ func openDebugConsoleWindow() {
         defer: false
     )
     window.title = "LinkOS Developer Console"
+    window.isReleasedWhenClosed = false
     window.contentView = NSHostingView(rootView: DebugConsoleView())
     window.center()
     window.level = .floating

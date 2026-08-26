@@ -64,6 +64,10 @@ final class ConnectionWatchdog {
     // MARK: - Checks
 
     private func performChecks() {
+        if PhoneSessionManager.shared.activeSession.isStreaming {
+            return // Do not restart network components if we have an active stream
+        }
+
         checkComponent(name: "WebSocketServer", isHealthy: webSocketServer?.isListening() ?? false) {
             Task { @MainActor [weak self] in
                 guard let self, let server = self.webSocketServer else { return }

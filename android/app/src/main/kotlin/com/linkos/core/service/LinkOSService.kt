@@ -120,8 +120,12 @@ class LinkOSService : Service(), ConnectionStateSubscriber {
         LinkOSLogger.info("Scheduling 2-minute auto-teardown job.", "Service")
         disconnectTimeoutJob = serviceScope.launch(kotlinx.coroutines.Dispatchers.Main) {
             kotlinx.coroutines.delay(120_000) // 2 minutes
-            LinkOSLogger.info("2-minute disconnect timeout reached. Stopping foreground service.", "Service")
+            LinkOSLogger.info("2-minute disconnect timeout reached. Stopping foreground service and killing process.", "Service")
             stopSelf()
+            
+            // Force kill the process after a brief delay to allow stopSelf to process
+            kotlinx.coroutines.delay(1000)
+            System.exit(0)
         }
     }
 
@@ -262,6 +266,7 @@ class LinkOSService : Service(), ConnectionStateSubscriber {
     }
 
     override suspend fun onConnectionPhaseChanged(phase: com.linkos.core.network.ConnectionPhase, device: com.linkos.core.network.PeerDevice?) {
+        LinkOSLogger.info("Connection phase changed: $phase", "Service")
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(NOTIFICATION_ID, createNotification())
 
@@ -270,6 +275,12 @@ class LinkOSService : Service(), ConnectionStateSubscriber {
             sendCapabilitiesToMac(isAccessibilityEnabled())
         } else {
             scheduleDisconnectTimeout()
+            
+            // Stop PhoneSessionService if it's running when disconnected
+            val stopIntent = Intent(this, PhoneSessionService::class.java).apply {
+                action = "STOP_STREAM"
+            }
+            startService(stopIntent)
             
             val keys = pendingAcks.keys().toList()
             for (key in keys) {
@@ -732,9 +743,10 @@ class LinkOSService : Service(), ConnectionStateSubscriber {
                 
                 when (action) {
                     "START_STREAM" -> {
+                        val sessionId = json.optString("session_id", "")
                         serviceScope.launch(Dispatchers.Main) {
-                            LinkOSLogger.info("[PhoneMirroring] (PASS) Launching ScreenCapturePermissionActivity context", "PhoneMirroring")
-                            ScreenCapturePermissionActivity.launch(this@LinkOSService)
+                            LinkOSLogger.info("[PhoneMirroring] (PASS) Launching ScreenCapturePermissionActivity context for session: $sessionId", "PhoneMirroring")
+                            ScreenCapturePermissionActivity.launch(this@LinkOSService, sessionId)
                         }
                     }
                     "PAUSE_STREAM" -> {
@@ -763,44 +775,247 @@ class LinkOSService : Service(), ConnectionStateSubscriber {
                         }
                         startService(intent)
                     }
-                    "CLICK" -> {
+                    "SET_BITRATE" -> {
+                        val bitrate = json.optInt("bitrate", 2000000)
+                        val intent = Intent(this, PhoneSessionService::class.java).apply {
+                            this.action = "SET_BITRATE"
+                            putExtra("BITRATE", bitrate)
+                        }
+                        startService(intent)
+                    }
+                    "SET_AUDIO_FORWARDING" -> {
+                        val enabled = json.optBoolean("enabled", false)
+                        val intent = Intent(this, PhoneSessionService::class.java).apply {
+                            this.action = "SET_AUDIO_FORWARDING"
+                            putExtra("ENABLED", enabled)
+                        }
+                        startService(intent)
+                    }
+                    "ROTATE_LEFT", "ROTATE_RIGHT", "ROTATE" -> {
+                        val direction = if (action == "ROTATE") json.optString("direction", "ROTATE_RIGHT") else action
+                        val intent = Intent(this, PhoneSessionService::class.java).apply {
+                            this.action = "ROTATE_DEVICE"
+                            putExtra("DIRECTION", direction)
+                        }
+                        startService(intent)
+                    }
+                    "DIM_SCREEN" -> {
+                        val intent = Intent(this, PhoneSessionService::class.java).apply {
+                            this.action = "DIM_SCREEN"
+                            putExtra("ENABLED", true)
+                        }
+                        startService(intent)
+                    }
+                    "RESTORE_BRIGHTNESS" -> {
+                        val intent = Intent(this, PhoneSessionService::class.java).apply {
+                            this.action = "DIM_SCREEN"
+                            putExtra("ENABLED", false)
+                        }
+                        startService(intent)
+                    }
+                    "CLICK", "TAP" -> {
                         val x = json.optDouble("x", 0.0).toFloat()
                         val y = json.optDouble("y", 0.0).toFloat()
-                        val metrics = resources.displayMetrics
-                        val absX = x * metrics.widthPixels
-                        val absY = y * metrics.heightPixels
-                        LinkOSAccessibilityService.instance?.injectClick(absX, absY)
+                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [1. RECEIVED] Action: $action | [2. DECODED] norm ($x, $y)", "InputPipeline")
+                        serviceScope.launch(Dispatchers.Main) {
+                            val service = LinkOSAccessibilityService.instance
+                            if (service == null) {
+                                com.linkos.core.logging.LinkOSLogger.error("[InputPipeline] [FAIL] LinkOSAccessibilityService.instance is NULL! Cannot inject click.", "InputPipeline")
+                            } else {
+                                service.injectClick(x, y)
+                            }
+                        }
                     }
-                    "SWIPE" -> {
-                        val startX = json.optDouble("startX", 0.0).toFloat()
-                        val startY = json.optDouble("startY", 0.0).toFloat()
+                    "DOUBLE_CLICK" -> {
+                        val x = json.optDouble("x", 0.0).toFloat()
+                        val y = json.optDouble("y", 0.0).toFloat()
+                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [1. RECEIVED & 2. DECODED] DOUBLE_CLICK at norm ($x, $y)", "InputPipeline")
+                        serviceScope.launch(Dispatchers.Main) {
+                            LinkOSAccessibilityService.instance?.injectDoubleClick(x, y)
+                        }
+                    }
+                    "LONG_PRESS" -> {
+                        val x = json.optDouble("x", 0.0).toFloat()
+                        val y = json.optDouble("y", 0.0).toFloat()
+                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [1. RECEIVED & 2. DECODED] LONG_PRESS at norm ($x, $y)", "InputPipeline")
+                        serviceScope.launch(Dispatchers.Main) {
+                            LinkOSAccessibilityService.instance?.injectLongPress(x, y)
+                        }
+                    }
+                    "DOWN" -> {
+                        val x = json.optDouble("x", 0.0).toFloat()
+                        val y = json.optDouble("y", 0.0).toFloat()
+                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [1. RECEIVED & 2. DECODED] DOWN at norm ($x, $y)", "InputPipeline")
+                        serviceScope.launch(Dispatchers.Main) {
+                            LinkOSAccessibilityService.instance?.injectTouchDown(x, y)
+                        }
+                    }
+                    "MOVE" -> {
+                        val x = json.optDouble("x", 0.0).toFloat()
+                        val y = json.optDouble("y", 0.0).toFloat()
+                        val startX = json.optDouble("startX", x.toDouble()).toFloat()
+                        val startY = json.optDouble("startY", y.toDouble()).toFloat()
+                        serviceScope.launch(Dispatchers.Main) {
+                            LinkOSAccessibilityService.instance?.injectTouchMove(x, y, startX, startY)
+                        }
+                    }
+                    "UP" -> {
+                        val x = json.optDouble("x", 0.0).toFloat()
+                        val y = json.optDouble("y", 0.0).toFloat()
+                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [1. RECEIVED & 2. DECODED] UP at norm ($x, $y)", "InputPipeline")
+                        serviceScope.launch(Dispatchers.Main) {
+                            LinkOSAccessibilityService.instance?.injectTouchUp(x, y)
+                        }
+                    }
+                    "HOVER" -> {
+                        val x = json.optDouble("x", 0.0).toFloat()
+                        val y = json.optDouble("y", 0.0).toFloat()
+                        serviceScope.launch(Dispatchers.Main) {
+                            LinkOSAccessibilityService.instance?.injectHover(x, y)
+                        }
+                    }
+                    "GESTURE_STREAM" -> {
+                        val type = if (json.has("gestureType")) json.optString("gestureType", "SCROLL") else json.optString("gesture_type", "SCROLL")
+                        val phase = json.optString("phase", "CHANGED")
+                        val x = if (json.has("normX")) json.optDouble("normX", 0.5).toFloat() else json.optDouble("x", 0.5).toFloat()
+                        val y = if (json.has("normY")) json.optDouble("normY", 0.5).toFloat() else json.optDouble("y", 0.5).toFloat()
+                        val deltaX = if (json.has("deltaX")) json.optDouble("deltaX", 0.0).toFloat() else json.optDouble("delta_x", 0.0).toFloat()
+                        val deltaY = if (json.has("deltaY")) json.optDouble("deltaY", 0.0).toFloat() else json.optDouble("delta_y", 0.0).toFloat()
+                        val velocity = json.optDouble("velocity", 0.0).toFloat()
+                        val momentum = json.optBoolean("momentum", false)
+                        val pressure = json.optDouble("pressure", 1.0).toFloat()
+                        val scale = json.optDouble("scale", 1.0).toFloat()
+                        val rotation = json.optDouble("rotation", 0.0).toFloat()
+                        val timestamp = json.optDouble("timestamp", 0.0).toLong()
+                        serviceScope.launch(Dispatchers.Main) {
+                            LinkOSAccessibilityService.instance?.injectGestureStream(
+                                type, phase, x, y, deltaX, deltaY, velocity, momentum, pressure, scale, rotation, timestamp
+                            )
+                        }
+                    }
+                    "SCROLL" -> {
+                        val x = json.optDouble("x", 0.0).toFloat()
+                        val y = json.optDouble("y", 0.0).toFloat()
+                        val deltaX = if (json.has("dx")) json.optDouble("dx", 0.0).toFloat() else json.optDouble("deltaX", 0.0).toFloat()
+                        val deltaY = if (json.has("dy")) json.optDouble("dy", 0.0).toFloat() else json.optDouble("deltaY", 0.0).toFloat()
+                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [1. RECEIVED & 2. DECODED] SCROLL delta ($deltaX, $deltaY)", "InputPipeline")
+                        serviceScope.launch(Dispatchers.Main) {
+                            LinkOSAccessibilityService.instance?.injectScroll(x, y, deltaX, deltaY)
+                        }
+                    }
+                    "MULTI_TOUCH" -> {
+                        val x1 = json.optDouble("x1", 0.0).toFloat(); val y1 = json.optDouble("y1", 0.0).toFloat()
+                        val x2 = json.optDouble("x2", 0.0).toFloat(); val y2 = json.optDouble("y2", 0.0).toFloat()
+                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [1. RECEIVED & 2. DECODED] MULTI_TOUCH ($x1, $y1) & ($x2, $y2)", "InputPipeline")
+                        serviceScope.launch(Dispatchers.Main) {
+                            LinkOSAccessibilityService.instance?.injectMultiTouch(x1, y1, x2, y2)
+                        }
+                    }
+                    "SWIPE", "DRAG" -> {
+                        var startX = json.optDouble("startX", Double.NaN)
+                        var startY = json.optDouble("startY", Double.NaN)
+                        if (startX.isNaN()) startX = json.optDouble("x", 0.0)
+                        if (startY.isNaN()) startY = json.optDouble("y", 0.0)
                         val endX = json.optDouble("endX", 0.0).toFloat()
                         val endY = json.optDouble("endY", 0.0).toFloat()
                         val duration = json.optLong("duration", 300)
-                        val metrics = resources.displayMetrics
-                        val absStartX = startX * metrics.widthPixels
-                        val absStartY = startY * metrics.heightPixels
-                        val absEndX = endX * metrics.widthPixels
-                        val absEndY = endY * metrics.heightPixels
-                        LinkOSAccessibilityService.instance?.injectSwipe(absStartX, absStartY, absEndX, absEndY, duration)
+                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [1. RECEIVED] Action: $action | [2. DECODED] SWIPE/DRAG norm (${startX.toFloat()}, ${startY.toFloat()}) -> ($endX, $endY)", "InputPipeline")
+                        serviceScope.launch(Dispatchers.Main) {
+                            val service = LinkOSAccessibilityService.instance
+                            if (service == null) {
+                                com.linkos.core.logging.LinkOSLogger.error("[InputPipeline] [FAIL] LinkOSAccessibilityService.instance is NULL during SWIPE/DRAG!", "InputPipeline")
+                            } else {
+                                service.injectSwipe(startX.toFloat(), startY.toFloat(), endX, endY, duration)
+                            }
+                        }
                     }
-                    "TEXT" -> {
+                    "TEXT", "INPUT_TEXT" -> {
                         val textVal = json.optString("text", "")
+                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [1 & 2] RECEIVED & DECODED TEXT/INPUT_TEXT: '$textVal'", "InputPipeline")
                         if (textVal.isNotEmpty()) {
-                            LinkOSAccessibilityService.instance?.injectText(textVal)
+                            serviceScope.launch(Dispatchers.Main) {
+                                LinkOSAccessibilityService.instance?.injectText(textVal)
+                            }
                         }
                     }
                     "BACKSPACE" -> {
-                        LinkOSAccessibilityService.instance?.injectBackspace()
+                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [1 & 2] RECEIVED BACKSPACE", "InputPipeline")
+                        serviceScope.launch(Dispatchers.Main) {
+                            LinkOSAccessibilityService.instance?.injectBackspace()
+                        }
+                    }
+                    "INPUT_KEY" -> {
+                        val key = json.optString("key", "")
+                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [1 & 2] RECEIVED & DECODED INPUT_KEY: '$key'", "InputPipeline")
+                        serviceScope.launch(Dispatchers.Main) {
+                            val service = LinkOSAccessibilityService.instance
+                            if (service != null) {
+                                when (key) {
+                                    "KEY_BACK", "KEYCODE_BACK" -> {
+                                        val res = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+                                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [GLOBAL_ACTION] performGlobalAction(GLOBAL_ACTION_BACK) on Main Thread returned: $res", "InputPipeline")
+                                    }
+                                    "KEY_HOME", "KEYCODE_HOME" -> {
+                                        val res = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+                                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [GLOBAL_ACTION] performGlobalAction(GLOBAL_ACTION_HOME) on Main Thread returned: $res", "InputPipeline")
+                                    }
+                                    "KEY_RECENTS", "KEYCODE_APP_SWITCH", "KEYCODE_RECENT_APPS" -> {
+                                        val res = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
+                                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [GLOBAL_ACTION] performGlobalAction(GLOBAL_ACTION_RECENTS) on Main Thread returned: $res", "InputPipeline")
+                                    }
+                                    "KEYCODE_DEL", "KEY_BACKSPACE" -> {
+                                        service.injectBackspace()
+                                    }
+                                    "KEY_COPY", "KEYCODE_COPY" -> {
+                                        service.injectCopy()
+                                    }
+                                    "KEY_PASTE", "KEYCODE_PASTE" -> {
+                                        service.injectPaste()
+                                    }
+                                    "KEY_SCREENSHOT" -> {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                            val res = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT)
+                                            com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [GLOBAL_ACTION] performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT) returned: $res", "InputPipeline")
+                                        }
+                                    }
+                                    else -> {
+                                        com.linkos.core.logging.LinkOSLogger.warning("[InputPipeline] Unhandled INPUT_KEY code: '$key'", "InputPipeline")
+                                    }
+                                }
+                            } else {
+                                com.linkos.core.logging.LinkOSLogger.error("[InputPipeline] [FAIL] LinkOSAccessibilityService.instance is NULL for INPUT_KEY ($key)!", "InputPipeline")
+                            }
+                        }
                     }
                     "KEY_BACK" -> {
-                        LinkOSAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [1. RECEIVED] KEY_BACK direct command", "InputPipeline")
+                        serviceScope.launch(Dispatchers.Main) {
+                            val res = LinkOSAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+                            com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [GLOBAL_ACTION] performGlobalAction(GLOBAL_ACTION_BACK) returned: $res", "InputPipeline")
+                        }
                     }
                     "KEY_HOME" -> {
-                        LinkOSAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [1. RECEIVED] KEY_HOME direct command", "InputPipeline")
+                        serviceScope.launch(Dispatchers.Main) {
+                            val res = LinkOSAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+                            com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [GLOBAL_ACTION] performGlobalAction(GLOBAL_ACTION_HOME) returned: $res", "InputPipeline")
+                        }
                     }
                     "KEY_RECENTS" -> {
-                        LinkOSAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
+                        com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [1. RECEIVED] KEY_RECENTS direct command", "InputPipeline")
+                        serviceScope.launch(Dispatchers.Main) {
+                            val res = LinkOSAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
+                            com.linkos.core.logging.LinkOSLogger.info("[InputPipeline] [GLOBAL_ACTION] performGlobalAction(GLOBAL_ACTION_RECENTS) returned: $res", "InputPipeline")
+                        }
+                    }
+                    "SET_VOLUME" -> {
+                        val volume = json.optDouble("volume", 0.5)
+                        val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                        val streamType = android.media.AudioManager.STREAM_MUSIC
+                        val maxVolume = audioManager.getStreamMaxVolume(streamType)
+                        val targetVol = (volume * maxVolume).toInt().coerceIn(0, maxVolume)
+                        audioManager.setStreamVolume(streamType, targetVol, 0)
+                        com.linkos.core.logging.LinkOSLogger.info("[PhoneMirroring] SET_VOLUME applied to $targetVol (norm: $volume)", "PhoneMirroring")
                     }
                     "CALL_ANSWER" -> {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

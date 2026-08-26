@@ -20,6 +20,13 @@ final class WebSocketServer {
     private var cancellables = Set<AnyCancellable>()
     private var isCurrentlyListening = false
     
+    // Instrumentation
+    var rxPacketCount: Int = 0
+    var rxBytes: Int = 0
+    var txPacketCount: Int = 0
+    var txBytes: Int = 0
+    private var statsTimer: Timer?
+    
     public var activeConnectedDeviceConnection: WebSocketConnection? {
         return connections.values.first { !$0.isInput }
     }
@@ -79,6 +86,10 @@ final class WebSocketServer {
         self.isCurrentlyListening = true
         
         logger.info("WebSocket server listening on port \(port)", category: .network)
+        
+        Task { @MainActor in
+            self.startStatsTimer()
+        }
     }
     
     func stop() async {
@@ -87,7 +98,31 @@ final class WebSocketServer {
         channel = nil
         group = nil
         isCurrentlyListening = false
+        stopStatsTimer()
         logger.info("WebSocket server stopped", category: .network)
+    }
+    
+    private func startStatsTimer() {
+        statsTimer?.invalidate()
+        statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            Task { @MainActor in
+                if self.rxPacketCount > 0 || self.txPacketCount > 0 {
+                    let rxMB = Double(self.rxBytes) / 1_048_576.0
+                    let txMB = Double(self.txBytes) / 1_048_576.0
+                    self.logger.info("[TRANSPORT STATS] RX: \(self.rxPacketCount) pkts/sec (\(String(format: "%.2f", rxMB)) MB/s) | TX: \(self.txPacketCount) pkts/sec (\(String(format: "%.2f", txMB)) MB/s)", category: .network)
+                }
+                self.rxPacketCount = 0
+                self.rxBytes = 0
+                self.txPacketCount = 0
+                self.txBytes = 0
+            }
+        }
+    }
+    
+    private func stopStatsTimer() {
+        statsTimer?.invalidate()
+        statsTimer = nil
     }
     
     // MARK: - Connection Management
@@ -167,6 +202,9 @@ final class WebSocketServer {
     }
     
     func handleIncomingData(_ data: Data, from connection: WebSocketConnection) async {
+        rxPacketCount += 1
+        rxBytes += data.count
+        
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         
         // Extract effective payload JSON if wrapped in channel envelope {"channel": "...", "payload": "..." | {...}}
@@ -450,14 +488,14 @@ final class WebSocketServer {
                         } catch {
                             LinkOSLogger.shared.error("[RemoteDesktop] ERROR: Failed to send frame: \(error.localizedDescription)", category: .media)
                         }
-                        lock.lock()
-                        isSendingFrame = false
-                        lock.unlock()
+                        lock.withLock {
+                            isSendingFrame = false
+                        }
                     }
                 } else {
-                    lock.lock()
-                    isSendingFrame = false
-                    lock.unlock()
+                    lock.withLock {
+                        isSendingFrame = false
+                    }
                 }
             }
         }
@@ -468,6 +506,8 @@ final class WebSocketServer {
 
 /// Represents a single WebSocket connection to a peer device.
 final class WebSocketConnection {
+    static var activeInstanceCount: Int = 0
+    
     let id: String
     let channel: Channel
     let isInput: Bool
@@ -481,6 +521,14 @@ final class WebSocketConnection {
         self.id = id
         self.channel = channel
         self.isInput = isInput
+        
+        WebSocketConnection.activeInstanceCount += 1
+        LinkOSLogger.shared.info("[Instance Monitor] WebSocketConnection initialized (\(id)). Active instances: \(WebSocketConnection.activeInstanceCount)", category: .network)
+    }
+    
+    deinit {
+        WebSocketConnection.activeInstanceCount -= 1
+        LinkOSLogger.shared.info("[Instance Monitor] WebSocketConnection deallocated (\(id)). Active instances: \(WebSocketConnection.activeInstanceCount)", category: .network)
     }
     
     func setDeviceId(_ deviceId: String) {
@@ -506,8 +554,70 @@ final class WebSocketConnection {
         buffer.writeBytes(payload)
         let frame = WebSocketFrame(fin: true, opcode: opcode, data: buffer)
         try await channel.writeAndFlush(frame)
+        
+        Task { @MainActor in
+            WebSocketServer.shared.txPacketCount += 1
+            WebSocketServer.shared.txBytes += payload.count
+        }
     }
     
+    private let incomingPacketQueue = DispatchQueue(label: "com.linkos.incomingpacket", qos: .userInteractive)
+    private let packetQueueLock = NSLock()
+    private var pendingPacketCount: Int = 0
+    private var maxQueueDepth: Int = 0
+
+    func receiveSerial(_ data: Data) {
+        let enqueueTime = Date()
+        packetQueueLock.lock()
+        pendingPacketCount += 1
+        let currentDepth = pendingPacketCount
+        if currentDepth > maxQueueDepth {
+            maxQueueDepth = currentDepth
+        }
+        packetQueueLock.unlock()
+        
+        incomingPacketQueue.async { [weak self] in
+            guard let self = self else { return }
+            
+            let waitTimeMs = Date().timeIntervalSince(enqueueTime) * 1000
+            
+            self.packetQueueLock.lock()
+            self.pendingPacketCount -= 1
+            let remainingDepth = self.pendingPacketCount
+            self.packetQueueLock.unlock()
+            
+            if waitTimeMs > 20.0 {
+                LinkOSLogger.shared.info("[Queue Monitor] Packet waited \(String(format: "%.2f", waitTimeMs))ms in serial queue. Depth: \(remainingDepth) packets. Max depth: \(self.maxQueueDepth)", category: .media)
+            }
+            
+            let plaintext: Data
+            if let session = self.encryptedSession {
+                guard let decrypted = try? session.decrypt(data) else {
+                    return
+                }
+                plaintext = decrypted
+            } else {
+                plaintext = data
+            }
+            
+            // Fast path for raw video display frames
+            let isJPEG = plaintext.count > 3 && plaintext[0] == 0xFF && plaintext[1] == 0xD8 && plaintext[2] == 0xFF
+            let isRawH264 = plaintext.count > 4 && plaintext[0] == 0x00 && plaintext[1] == 0x00 && ((plaintext[2] == 0x00 && plaintext[3] == 0x01) || plaintext[2] == 0x01)
+            let isFramedVideo = plaintext.count > 15 && plaintext[0] == 0xCC
+            
+            if isJPEG || isRawH264 || isFramedVideo {
+                let session = PhoneSessionManager.shared.activeSession
+                session.receiveFrame(plaintext)
+                return
+            }
+            
+            // For other control messages, route via onMessage asynchronously on the cooperative pool
+            Task {
+                await self.onMessage?(plaintext)
+            }
+        }
+    }
+
     func receive(_ data: Data) async {
         let sessionId = await AppState.shared.activeSession?.id ?? "NONE"
         let plaintext: Data
@@ -557,8 +667,18 @@ private final class LinkOSWebSocketHandler: ChannelInboundHandler {
         conn.onMessage = { [weak self] data in
             guard let self = self, let server = self.server else { return }
             
-            // Fast path for raw JPEG mirroring display frames from Android
-            if data.count > 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+            // Fast path for raw mirroring display frames from Android (JPEG or H.264 Annex-B)
+            let isJPEG = data.count > 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF
+            let isRawH264 = data.count > 4 && data[0] == 0x00 && data[1] == 0x00 && ((data[2] == 0x00 && data[3] == 0x01) || data[2] == 0x01)
+            // Custom LinkOS framed video packet: Byte 0 = 0xCC (video), Byte 1 = session generation
+            let isFramedVideo = data.count > 15 && data[0] == 0xCC
+            
+            Task { @MainActor in
+                server.rxPacketCount += 1
+                server.rxBytes += data.count
+            }
+            
+            if isJPEG || isRawH264 || isFramedVideo {
                 if let mirroringPlugin = await AppState.shared.pluginManager?.getPlugin(PhoneMirroringPlugin.self) {
                     await mirroringPlugin.handleRawStreamFrame(data)
                 }
@@ -601,7 +721,9 @@ private final class LinkOSWebSocketHandler: ChannelInboundHandler {
             frame.maskKey = nil
         }
         
-        LinkOSLogger.shared.info("[RAW FRAME RECEIVED] opcode=\(frame.opcode) length=\(frame.data.readableBytes) masked=\(isMaskedBefore)", category: .network)
+        if frame.opcode != .binary {
+            LinkOSLogger.shared.info("[RAW FRAME RECEIVED] opcode=\(frame.opcode) length=\(frame.data.readableBytes) masked=\(isMaskedBefore)", category: .network)
+        }
         
         switch frame.opcode {
         case .text, .binary:
@@ -643,9 +765,7 @@ private final class LinkOSWebSocketHandler: ChannelInboundHandler {
             }
             
             if let conn = connection {
-                Task {
-                    await conn.receive(data)
-                }
+                conn.receiveSerial(data)
             } else {
                 LinkOSLogger.shared.error("[TRANSPORT] CRITICAL FAILURE: connection object is nil in channelRead!", category: .network)
             }

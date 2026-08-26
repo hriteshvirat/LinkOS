@@ -40,18 +40,18 @@ public enum PermissionStatus: String, CaseIterable, Identifiable {
     public var id: String { rawValue }
 }
 
-/// Centralized Native macOS Permission Manager — single source of truth for all system permissions.
-/// Performs silent status preflights, exposes simple query APIs, and auto-refreshes in real-time when returning focus to LinkOS.
 @MainActor
-public enum ScreenRecordingPermissionState: String, Codable {
+public enum PermissionState: String, Codable {
     case unknown
-    case notRequested
-    case requesting
+    case checking
     case granted
     case denied
-    case waitingForUserAction
+    case requesting
+    case waitingForSystem
 }
 
+/// Centralized Native macOS Permission Manager — single source of truth for all system permissions.
+/// Performs silent status preflights, exposes simple query APIs, and auto-refreshes in real-time when returning focus to LinkOS.
 @MainActor
 public final class PermissionManager: ObservableObject {
     public static let shared = PermissionManager()
@@ -64,48 +64,54 @@ public final class PermissionManager: ObservableObject {
     @Published public var screenRecordingStatus: PermissionStatus = .actionRequired
     @Published public var notificationsStatus: PermissionStatus = .actionRequired
     
-    @Published public var screenRecordingState: ScreenRecordingPermissionState = .unknown
+    @Published public var screenRecordingState: PermissionState = .unknown
+    @Published public var accessibilityState: PermissionState = .unknown
     
     private var isNotificationChecking: Bool = false
+    
+    // Debounce / Concurrency guards
     private var isRequestingScreenRecording: Bool = false
+    private var isRequestingAccessibility: Bool = false
+    private var isRequestingNotifications: Bool = false
+    
     private var focusObserver: NSObjectProtocol?
-    private var pollingTimer: Timer?
+    /// Prevents repeated permission checks on rapid Cmd-Tab / window switches.
+    /// Permissions are only re-evaluated if at least 30 seconds have passed since the last check.
+    private var lastRefreshTime: Date = .distantPast
+    private let refreshCooldown: TimeInterval = 30
     
     private init() {
         // Read screen recording state from UserDefaults
         if let savedStateStr = UserDefaults.standard.string(forKey: "linkos_screen_recording_state"),
-           let savedState = ScreenRecordingPermissionState(rawValue: savedStateStr) {
+           let savedState = PermissionState(rawValue: savedStateStr) {
             self.screenRecordingState = savedState
         } else {
-            self.screenRecordingState = .notRequested
+            self.screenRecordingState = .unknown
         }
         
         // Perform initial silent status query
         refreshPermissionStates()
         
-        // Start live 500ms auto-refresh timer for real-time permission status updates
-        startPermissionPolling()
-        
-        // Auto-refresh permission status immediately when user switches back from macOS System Settings to LinkOS
+        // Auto-refresh permission status when user returns to the app from System Settings.
+        // Debounced to at most once per 30 seconds to avoid log spam on every Cmd-Tab.
         focusObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.refreshPermissionStates()
+                guard let self = self else { return }
+                let now = Date()
+                guard now.timeIntervalSince(self.lastRefreshTime) >= self.refreshCooldown else {
+                    LinkOSLogger.shared.debug("[PermissionManager] didBecomeActive: skipping refresh (cooldown active)", category: .security)
+                    return
+                }
+                self.refreshPermissionStates()
             }
         }
     }
     
-    private func startPermissionPolling() {
-        pollingTimer?.invalidate()
-        pollingTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.refreshPermissionStates()
-            }
-        }
-    }
+    // MARK: - Lifecycle
     
     deinit {
         if let observer = focusObserver {
@@ -113,10 +119,19 @@ public final class PermissionManager: ObservableObject {
         }
     }
     
-    private func updateScreenRecordingState(_ newState: ScreenRecordingPermissionState) {
-        self.screenRecordingState = newState
-        UserDefaults.standard.set(newState.rawValue, forKey: "linkos_screen_recording_state")
-        LinkOSLogger.shared.info("[PermissionManager] Screen Recording state transitioned to: \(newState.rawValue)", category: .security)
+    private func updateScreenRecordingState(_ newState: PermissionState) {
+        if self.screenRecordingState != newState {
+            LinkOSLogger.shared.info("[PermissionManager] [ScreenRecording] Transitioning from \(self.screenRecordingState.rawValue) to \(newState.rawValue)", category: .security)
+            self.screenRecordingState = newState
+            UserDefaults.standard.set(newState.rawValue, forKey: "linkos_screen_recording_state")
+        }
+    }
+
+    private func updateAccessibilityState(_ newState: PermissionState) {
+        if self.accessibilityState != newState {
+            LinkOSLogger.shared.info("[PermissionManager] [Accessibility] Transitioning from \(self.accessibilityState.rawValue) to \(newState.rawValue)", category: .security)
+            self.accessibilityState = newState
+        }
     }
     
     public func checkScreenRecordingPermissionSilent() -> Bool {
@@ -129,14 +144,19 @@ public final class PermissionManager: ObservableObject {
     
     /// Silently queries current native permission states on the Main thread without blocking UI.
     public func refreshPermissionStates() {
+        lastRefreshTime = Date()
+        updateAccessibilityState(.checking)
         let accessibility = AXIsProcessTrusted()
         
         if self.isAccessibilityGranted != accessibility {
             self.isAccessibilityGranted = accessibility
             self.accessibilityStatus = accessibility ? .authorized : .actionRequired
-            LinkOSLogger.shared.info("[PermissionManager Status Update] Accessibility: \(accessibility)", category: .security)
+            LinkOSLogger.shared.info("[PermissionManager] [Accessibility] State updated to \(accessibility ? "Granted" : "Denied")", category: .security)
+            LinkOSLogger.shared.info("[PermissionManager] [Accessibility] UI Updated", category: .security)
         }
+        updateAccessibilityState(accessibility ? .granted : .denied)
         
+        updateScreenRecordingState(.checking)
         let screenRecording = checkScreenRecordingPermissionSilent()
         
         if screenRecording {
@@ -146,50 +166,59 @@ public final class PermissionManager: ObservableObject {
             if !self.isScreenRecordingGranted {
                 self.isScreenRecordingGranted = true
                 self.screenRecordingStatus = .authorized
-                LinkOSLogger.shared.info("[PermissionManager Status Update] Screen Recording (Silent check): true", category: .security)
+                LinkOSLogger.shared.info("[PermissionManager] [ScreenRecording] State updated to Granted", category: .security)
+                LinkOSLogger.shared.info("[PermissionManager] [ScreenRecording] UI Updated", category: .security)
                 NotificationCenter.default.post(name: NSNotification.Name("LinkOSScreenRecordingGranted"), object: nil)
             }
         } else {
             if self.isScreenRecordingGranted {
                 self.isScreenRecordingGranted = false
                 self.screenRecordingStatus = .actionRequired
-                LinkOSLogger.shared.info("[PermissionManager Status Update] Screen Recording (Silent check): false", category: .security)
+                LinkOSLogger.shared.info("[PermissionManager] [ScreenRecording] State updated to Denied", category: .security)
+                LinkOSLogger.shared.info("[PermissionManager] [ScreenRecording] UI Updated", category: .security)
             }
             
             // If it was granted, but now it is false, the user revoked it in settings!
             if self.screenRecordingState == .granted {
                 updateScreenRecordingState(.denied)
+            } else {
+                updateScreenRecordingState(.denied)
             }
         }
         
-        guard !isNotificationChecking else { return }
-        isNotificationChecking = true
+        // Polling removed in favor of event-based caching.
         
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            let notifications = (settings.authorizationStatus == .authorized)
+        if NSClassFromString("XCTest") == nil {
+            guard !isNotificationChecking else { return }
+            isNotificationChecking = true
             
-            Task { @MainActor [weak self] in
-                guard let self = self else { return }
-                if self.isNotificationsGranted != notifications {
-                    self.isNotificationsGranted = notifications
-                    self.notificationsStatus = notifications ? .authorized : .actionRequired
-                    LinkOSLogger.shared.info("[PermissionManager Status Update] Notifications: \(notifications)", category: .security)
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                let notifications = (settings.authorizationStatus == .authorized)
+                
+                Task { @MainActor [weak self] in
+                    guard let self = self else { return }
+                    if self.isNotificationsGranted != notifications {
+                        self.isNotificationsGranted = notifications
+                        self.notificationsStatus = notifications ? .authorized : .actionRequired
+                        LinkOSLogger.shared.info("[PermissionManager] [Notifications] State updated to \(notifications ? "Granted" : "Denied")", category: .security)
+                        LinkOSLogger.shared.info("[PermissionManager] [Notifications] UI Updated", category: .security)
+                    }
+                    self.isNotificationChecking = false
                 }
-                self.isNotificationChecking = false
             }
         }
     }
     
     /// Checks permissions silently on launch without showing dialogs or popups.
     public func checkPermissionsSilentlyOnLaunch() {
+        LinkOSLogger.shared.info("[PermissionManager] Silent startup flow initiated. Reading macOS permission states.", category: .security)
         refreshPermissionStates()
     }
     
     /// Returns current authorization status for a specific permission.
     public func hasPermission(_ type: SystemPermissionType) -> Bool {
         switch type {
-        case .screenRecording:
-            return checkScreenRecordingPermissionSilent()
+        case .screenRecording: return checkScreenRecordingPermissionSilent()
         case .accessibility: return AXIsProcessTrusted()
         case .notifications: return isNotificationsGranted
         }
@@ -209,21 +238,28 @@ public final class PermissionManager: ObservableObject {
     public func requestPermissionExplicitly(_ permission: SystemPermissionType) {
         switch permission {
         case .screenRecording:
+            // Idempotency Check
             if checkScreenRecordingPermissionSilent() {
                 updateScreenRecordingState(.granted)
                 refreshPermissionStates()
+                LinkOSLogger.shared.info("[PermissionManager] [ScreenRecording] Request ignored: already granted.", category: .security)
                 return
             }
             
-            // Prevent duplicate request overlap
-            guard !isRequestingScreenRecording else { return }
+            // Debounce Guard
+            guard !isRequestingScreenRecording else {
+                LinkOSLogger.shared.info("[PermissionManager] [ScreenRecording] Request debounced: already in flight.", category: .security)
+                return 
+            }
             isRequestingScreenRecording = true
+            updateScreenRecordingState(.requesting)
             
-            if self.screenRecordingState == .denied || self.screenRecordingState == .waitingForUserAction {
-                updateScreenRecordingState(.waitingForUserAction)
+            if self.screenRecordingState == .denied || self.screenRecordingState == .waitingForSystem {
+                updateScreenRecordingState(.waitingForSystem)
                 openSystemSettings(for: .screenRecording)
+
             } else {
-                updateScreenRecordingState(.requesting)
+                updateScreenRecordingState(.waitingForSystem)
                 if #available(macOS 11.0, *) {
                     // Triggers the system authorization prompt
                     let granted = CGRequestScreenCaptureAccess()
@@ -232,38 +268,63 @@ public final class PermissionManager: ObservableObject {
                         self.isScreenRecordingGranted = true
                         self.screenRecordingStatus = .authorized
                         NotificationCenter.default.post(name: NSNotification.Name("LinkOSScreenRecordingGranted"), object: nil)
+
                     } else {
                         updateScreenRecordingState(.denied)
                     }
                 } else {
                     updateScreenRecordingState(.granted)
+
                 }
             }
-            
             isRequestingScreenRecording = false
             
         case .accessibility:
+            // Idempotency Check
             if AXIsProcessTrusted() {
-                LinkOSLogger.shared.info("[PermissionManager] Accessibility already trusted — skipping prompt", category: .security)
+                LinkOSLogger.shared.info("[PermissionManager] [Accessibility] Request ignored: already granted.", category: .security)
+                updateAccessibilityState(.granted)
+                refreshPermissionStates()
                 return
             }
+            
+            // Debounce Guard
+            guard !isRequestingAccessibility else {
+                LinkOSLogger.shared.info("[PermissionManager] [Accessibility] Request debounced: already in flight.", category: .security)
+                return
+            }
+            isRequestingAccessibility = true
+            updateAccessibilityState(.requesting)
+            
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
             let trusted = AXIsProcessTrustedWithOptions(options)
-            if !trusted {
+            
+            if trusted {
+                updateAccessibilityState(.granted)
+                self.isAccessibilityGranted = true
+                self.accessibilityStatus = .authorized
+            } else {
+                updateAccessibilityState(.waitingForSystem)
                 openSystemSettings(for: .accessibility)
+
             }
             
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                let trustedAfter = AXIsProcessTrusted()
-                LinkOSLogger.shared.info("[PermissionManager] AX trusted after returning (2s delay): \(trustedAfter)", category: .security)
-                self?.refreshPermissionStates()
-            }
+            isRequestingAccessibility = false
             
         case .notifications:
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in
-                Task { @MainActor [weak self] in
-                    self?.refreshPermissionStates()
+            // Debounce Guard
+            guard !isRequestingNotifications else { return }
+            isRequestingNotifications = true
+            
+            if NSClassFromString("XCTest") == nil {
+                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in
+                    Task { @MainActor [weak self] in
+                        self?.refreshPermissionStates()
+                        self?.isRequestingNotifications = false
+                    }
                 }
+            } else {
+                self.isRequestingNotifications = false
             }
             openSystemSettings(for: .notifications)
         }

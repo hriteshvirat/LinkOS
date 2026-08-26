@@ -3,15 +3,11 @@ import AppKit
 import UniformTypeIdentifiers
 
 struct PhoneMirroringView: View {
-    @StateObject private var session = PhoneSession.shared
-    @State private var showControlsOverlay = false
-    @State private var showNavigationOverlay = false
+    @ObservedObject var session: PhoneSession
+    
     @State private var timeoutTimer: Timer? = nil
     @State private var showDevDiagnostics = false
-    
-    // Configurable navigation overlay modes: "Always Show", "Auto-hide", "Disabled"
-    @AppStorage("phone_navigation_overlay_mode") private var navMode = "Auto-hide"
-    
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -119,32 +115,63 @@ struct PhoneMirroringView: View {
                 .zIndex(100)
             }
             
-            if session.isStreaming, let frame = session.currentFrame {
+            if session.mirrorState == .presenting || session.mirrorState == .streaming || session.rendererStatus == .success || session.currentFrame != nil {
                 ZStack {
-                    PhoneDisplayCanvasViewRepresentable(frame: frame)
-                        .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
-                        .padding(12) // Outer Bezel spacing
-                        .shadow(color: Color.black.opacity(0.5), radius: 20, x: 0, y: 10)
+                    // Video fills the content area below the titlebar (respects safe area).
+                    // The window's windowWillResize math already subtracts titleBarHeight,
+                    // so the content area has the exact device aspect ratio — no bars.
+                    PhoneMetalCanvasViewRepresentable(session: session)
+                        .ignoresSafeArea(edges: [.horizontal, .bottom])
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .onAppear {
+                            LinkOSLogger.shared.info("[Pipeline Transition 3/4] PhoneMetalCanvasViewRepresentable appeared in SwiftUI body (Session ID: \(session.sessionId), ObjectIdentifier: \(ObjectIdentifier(session)))", category: .media)
+                        }
+                    
+                    TouchRippleView(location: session.tapLocation, trigger: session.tapTrigger)
                     
                     if session.connectionState == .reconnecting {
-                        VisualEffectView(material: .hudWindow, blendingMode: .withinWindow)
-                            .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
-                            .padding(12)
-                            .overlay(
-                                VStack(spacing: 12) {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .scaleEffect(1.2)
-                                    Text("Connection Lost")
-                                        .font(.system(.headline, design: .rounded))
-                                        .foregroundColor(.white)
-                                    Text("Reconnecting to phone...")
-                                        .font(.system(.subheadline, design: .rounded))
-                                        .foregroundColor(.gray)
+                        VStack {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                                    .frame(width: 16, height: 16)
+                                
+                                Text("Reconnecting...")
+                                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                                    .foregroundColor(.white)
+                                
+                                Button(action: {
+                                    PhoneWindowController.disconnectMirror()
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(Color.gray)
                                 }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(
+                                VisualEffectView(material: .hudWindow, blendingMode: .withinWindow)
+                                    .clipShape(Capsule())
+                                    .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                                    .shadow(color: Color.black.opacity(0.4), radius: 10, x: 0, y: 5)
                             )
+                            .padding(.top, 16)
+                            
+                            Spacer()
+                        }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: session.connectionState)
+                        .zIndex(50)
                     }
                 }
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1.0)
+                )
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                     for provider in providers {
                         _ = provider.loadObject(ofClass: URL.self) { url, error in
@@ -191,19 +218,29 @@ struct PhoneMirroringView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 24)
                     
-                    // Pipeline Status List
-                    VStack(alignment: .leading, spacing: 12) {
-                        DiagnosticRow(title: "1. Connection (WebSocket)", status: session.connectionStatus)
-                        DiagnosticRow(title: "2. MediaProjection Permission", status: session.mediaProjectionStatus)
-                        DiagnosticRow(title: "3. Frame Capture (VirtualDisplay)", status: session.frameCaptureStatus)
-                        DiagnosticRow(title: "4. Frame Encoder (Android)", status: session.encoderStatus)
-                        DiagnosticRow(title: "5. Network Transmission", status: session.networkStatus)
-                        DiagnosticRow(title: "6. Frame Decoder (Mac)", status: session.decoderStatus)
-                        DiagnosticRow(title: "7. Renderer (Canvas)", status: session.rendererStatus)
+                    // Pipeline Status — 3-Section Diagnostic Model
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            macSideDiagnosticsView
+                            
+                            if session.mediaProjectionStatus == .pending && session.connectionStatus == .success {
+                                waitingIndicatorView
+                            } else {
+                                Divider().background(Color.white.opacity(0.15))
+                            }
+                            
+                            androidSideDiagnosticsView
+                            
+                            Divider().background(Color.white.opacity(0.15))
+                            
+                            macDecoderDiagnosticsView
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding()
                     .background(Color.white.opacity(0.05))
                     .cornerRadius(12)
+                    .frame(maxHeight: 320)
                     .padding(.horizontal, 24)
                     
                     if !session.lastErrorMessage.isEmpty {
@@ -251,189 +288,20 @@ struct PhoneMirroringView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black.opacity(0.9))
             } else {
-                VStack(spacing: 20) {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        .scaleEffect(1.2)
-                    Text("Waiting for Android device...")
-                        .font(.system(.body, design: .rounded))
-                        .foregroundColor(.gray)
-                    Text("Make sure LinkOS companion app is active on your phone and permissions are enabled.")
-                        .font(.system(.caption, design: .rounded))
-                        .foregroundColor(.darkGray)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
-                }
+                PhoneWaitingUI(session: session)
             }
             
-            // Developer Diagnostics Panel Overlay
+            // Developer Diagnostics Panel (from ⋯ → Developer → Show Diagnostics)
             if showDevDiagnostics {
                 VStack {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("🛠 Developer Diagnostics")
-                                .font(.system(.subheadline, design: .rounded))
-                                .fontWeight(.bold)
-                                .foregroundColor(.green)
-                            Spacer()
-                            Button(action: { showDevDiagnostics = false }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.white.opacity(0.6))
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                        }
-                        
-                        Divider().background(Color.white.opacity(0.1))
-                        
-                        Group {
-                            DevDiagnosticRow(title: "WebSocket Connection", status: session.connectionStatus)
-                            DevDiagnosticRow(title: "MediaProjection Permission", status: session.mediaProjectionStatus)
-                            DevDiagnosticRow(title: "VirtualDisplay Capture", status: session.frameCaptureStatus)
-                            DevDiagnosticRow(title: "Android Frame Encoder", status: session.encoderStatus)
-                            DevDiagnosticRow(title: "Network Transmission", status: session.networkStatus)
-                            DevDiagnosticRow(title: "Mac Frame Decoder", status: session.decoderStatus)
-                            DevDiagnosticRow(title: "Mac Canvas Renderer", status: session.rendererStatus)
-                        }
-                    }
-                    .padding(12)
-                    .background(Color.black.opacity(0.85))
-                    .cornerRadius(16)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
-                    )
-                    .frame(width: 280)
-                    .padding(.top, session.callState == "RINGING" ? 120 : 40)
-                    .shadow(radius: 15)
+                    DevDiagnosticsOverlay(session: session, isShowing: $showDevDiagnostics)
+                        .padding(.top, session.callState == "RINGING" ? 120 : 40)
+                        .padding(.leading, 16)
                     Spacer()
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showDevDiagnostics)
                 .zIndex(90)
-            }
-            
-            // Hover Overlay Control Panel (Screenshot, PiP, Record, Disconnect)
-            VStack {
-                Spacer()
-                if showControlsOverlay {
-                    HStack(spacing: 16) {
-                        Button(action: { triggerScreenshot() }) {
-                            Image(systemName: "camera.fill")
-                                .foregroundColor(.white)
-                                .padding(10)
-                                .background(Color.white.opacity(0.15))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .help("Take Screenshot")
-                        
-                        Button(action: { togglePiP() }) {
-                            Image(systemName: "pip.fill")
-                                .foregroundColor(.white)
-                                .padding(10)
-                                .background(Color.white.opacity(0.15))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .help("Picture in Picture")
-                        
-                        Button(action: { toggleRecording() }) {
-                            Image(systemName: "record.circle")
-                                .foregroundColor(.red)
-                                .padding(10)
-                                .background(Color.white.opacity(0.15))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .help("Record Mirrored Session")
-                        
-                        Button(action: {
-                            Task {
-                                await session.togglePrivacyMode(enabled: !session.isPrivacyModeEnabled)
-                            }
-                        }) {
-                            Image(systemName: session.isPrivacyModeEnabled ? "eye.slash.fill" : "eye.fill")
-                                .foregroundColor(session.isPrivacyModeEnabled ? .blue : .white)
-                                .padding(10)
-                                .background(Color.white.opacity(0.15))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .help(session.isPrivacyModeEnabled ? "Disable Privacy Mode (Show Screen)" : "Enable Privacy Mode (Dim Screen)")
-
-                        Button(action: { showDevDiagnostics.toggle() }) {
-                            Image(systemName: "ladybug.fill")
-                                .foregroundColor(showDevDiagnostics ? .green : .white)
-                                .padding(10)
-                                .background(Color.white.opacity(0.15))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .help("Developer Diagnostics Panel")
-
-                        Button(action: { disconnectSession() }) {
-                            Image(systemName: "power")
-                                .foregroundColor(.white)
-                                .padding(10)
-                                .background(Color.red.opacity(0.8))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .help("Disconnect")
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow).cornerRadius(28))
-                    .shadow(radius: 10)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .padding(.bottom, 20)
-                }
-            }
-            
-            // Optional Navigation Overlay (Back, Home, Recents)
-            VStack {
-                Spacer()
-                if shouldShowNavigationOverlay {
-                    HStack(spacing: 40) {
-                        Button(action: { session.sendKey("KEY_BACK") }) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.white)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .help("Back")
-                        
-                        Button(action: { session.sendKey("KEY_HOME") }) {
-                            Image(systemName: "circle")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.white)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .help("Home")
-                        
-                        Button(action: { session.sendKey("KEY_RECENTS") }) {
-                            Image(systemName: "square")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.white)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .help("Recents")
-                    }
-                    .padding(.horizontal, 30)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.6))
-                    .cornerRadius(20)
-                    .padding(.bottom, showControlsOverlay ? 80 : 20)
-                    .transition(.opacity)
-                }
-            }
-        }
-        .onHover { hovering in
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                showControlsOverlay = hovering
-                if navMode == "Auto-hide" {
-                    showNavigationOverlay = hovering
-                }
             }
         }
         .onAppear {
@@ -444,23 +312,14 @@ struct PhoneMirroringView: View {
         }
     }
     
-    private var shouldShowNavigationOverlay: Bool {
-        if navMode == "Always Show" {
-            return true
-        } else if navMode == "Auto-hide" {
-            return showNavigationOverlay
-        }
-        return false
-    }
-    
-    // MARK: - Actions Triggers
+    // MARK: - Actions
     
     private func startDiagnosticsTimer() {
         timeoutTimer?.invalidate()
         timeoutTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: false) { _ in
             Task { @MainActor in
-                if PhoneSession.shared.rendererStatus != .success {
-                    PhoneSession.shared.diagnosticsTimeoutReached = true
+                if PhoneSessionManager.shared.activeSession.rendererStatus != .success {
+                    PhoneSessionManager.shared.activeSession.diagnosticsTimeoutReached = true
                 }
             }
         }
@@ -471,22 +330,60 @@ struct PhoneMirroringView: View {
         timeoutTimer = nil
     }
     
-    private func triggerScreenshot() {
-        // Screenshots trigger handled locally or requested from Android
+    @ViewBuilder
+    private var macSideDiagnosticsView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Mac Side")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(.white.opacity(0.9))
+            DiagnosticRow(title: "WebSocket Connection", status: session.connectionStatus)
+        }
     }
     
-    private func togglePiP() {
-        PhoneWindowController.shared.togglePiP()
+    @ViewBuilder
+    private var waitingIndicatorView: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .scaleEffect(0.7)
+                .frame(width: 14, height: 14)
+            Text("Waiting for Android...")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.orange)
+        }
+        .padding(.vertical, 4)
     }
     
-    private func toggleRecording() {
-        // Recording frame triggers
+    @ViewBuilder
+    private var androidSideDiagnosticsView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Android Side")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(.white.opacity(0.9))
+            DiagnosticRow(title: "MediaProjection Granted", status: session.mediaProjectionStatus)
+            DiagnosticRow(title: "Screen Capture (VirtualDisplay)", status: session.frameCaptureStatus)
+            DiagnosticRow(title: "Encoder Running", status: session.encoderStatus)
+            DiagnosticRow(title: "Network Delivery (SPS/PPS/Frames)", status: session.networkStatus)
+        }
     }
     
-    private func disconnectSession() {
-        Task {
-            await session.stopSession()
-            PhoneWindowController.shared.closeMirror()
+    @ViewBuilder
+    private var macDecoderDiagnosticsView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Mac Decoder")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(.white.opacity(0.9))
+            DiagnosticRow(title: "VideoToolbox Decoder", status: session.decoderStatus)
+            DiagnosticRow(title: "Canvas Renderer / Present", status: session.rendererStatus)
+            
+            if !session.watchdogDump.isEmpty {
+                Text(session.watchdogDump)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundColor(.orange)
+                    .padding(8)
+                    .background(Color.black.opacity(0.4))
+                    .cornerRadius(6)
+                    .padding(.top, 4)
+            }
         }
     }
 }
@@ -604,7 +501,7 @@ struct PhoneDisplayCanvasViewRepresentable: NSViewRepresentable {
     }
     
     func updateNSView(_ nsView: PhoneDisplayCanvasView, context: Context) {
-        nsView.updateFrame(frame)
+        // No longer pumping frames via SwiftUI updateNSView to avoid coalescing latency
     }
 }
 
@@ -616,8 +513,10 @@ final class PhoneDisplayCanvasView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
+        layer?.isOpaque = true
         
         contentLayer.contentsGravity = .resizeAspect
+        contentLayer.isOpaque = true
         layer?.addSublayer(contentLayer)
     }
     
@@ -627,6 +526,7 @@ final class PhoneDisplayCanvasView: NSView {
     
     override func layout() {
         super.layout()
+        guard bounds.width > 0, bounds.height > 0, !bounds.width.isNaN, !bounds.height.isNaN else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         contentLayer.frame = bounds
@@ -635,10 +535,65 @@ final class PhoneDisplayCanvasView: NSView {
     }
     
     func updateFrame(_ frame: CGImage) {
+        // Obsolete: Now handled by CVDisplayLink in renderOnVsync
+    }
+    
+    // MARK: - VSync Rendering
+    
+    private var displayLink: CVDisplayLink?
+    
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            setupDisplayLink()
+        } else {
+            teardownDisplayLink()
+        }
+    }
+    
+    private func setupDisplayLink() {
+        teardownDisplayLink()
+        var link: CVDisplayLink?
+        CVDisplayLinkCreateWithActiveCGDisplays(&link)
+        guard let displayLink = link else { return }
+        
+        let context = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        CVDisplayLinkSetOutputCallback(displayLink, { (displayLink, inNow, inOutputTime, flagsIn, flagsOut, displayLinkContext) -> CVReturn in
+            let view = Unmanaged<PhoneDisplayCanvasView>.fromOpaque(displayLinkContext!).takeUnretainedValue()
+            view.renderOnVsync()
+            return kCVReturnSuccess
+        }, context)
+        
+        CVDisplayLinkStart(displayLink)
+        self.displayLink = displayLink
+        LinkOSLogger.shared.info("[Render Thread] CVDisplayLink started for zero-latency vsync", category: .media)
+    }
+    
+    private func teardownDisplayLink() {
+        if let link = displayLink {
+            CVDisplayLinkStop(link)
+            displayLink = nil
+            LinkOSLogger.shared.info("[Render Thread] CVDisplayLink stopped", category: .media)
+        }
+    }
+    
+    private func renderOnVsync() {
+        // Poll atomic latest frame on the background display link thread
+        guard let latestTuple = PhoneSessionManager.shared.activeSession.popLatestFrame() else { return }
+        
+        let latestFrame = latestTuple.0
+        let metrics = latestTuple.1
+        
+        // Present immediately on the display link thread, completely bypassing main thread
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        contentLayer.contents = frame
+        self.contentLayer.contents = latestFrame
         CATransaction.commit()
+        
+        let renderTs = Date()
+        DispatchQueue.main.async {
+            PhoneSessionManager.shared.activeSession.recordPipelineMetrics(metrics, renderTs: renderTs)
+        }
     }
     
     // MARK: - Mouse Hover & Tracking Areas (Hides mouse inside phone display canvas)
@@ -680,7 +635,8 @@ final class PhoneDisplayCanvasView: NSView {
     }
     
     override func scrollWheel(with event: NSEvent) {
-        PhoneInputService.shared.handleScroll(with: event, viewSize: bounds.size)
+        let loc = convert(event.locationInWindow, from: nil)
+        PhoneInputService.shared.handleScroll(at: loc, event: event, viewSize: bounds.size)
     }
     
     override func keyDown(with event: NSEvent) {
@@ -690,7 +646,7 @@ final class PhoneDisplayCanvasView: NSView {
                    let bitmap = NSBitmapImageRep(data: tiff),
                    let png = bitmap.representation(using: .png, properties: [:]) {
                     let base64 = png.base64EncodedString()
-                    PhoneSession.shared.sendClipboardImage(base64)
+                    PhoneSessionManager.shared.activeSession.sendClipboardImage(base64)
                     return
                 }
             }
@@ -721,4 +677,33 @@ struct VisualEffectView: NSViewRepresentable {
 // Dark Gray Color Extension for UI fallback consistency
 extension Color {
     static let darkGray = Color(NSColor.darkGray)
+}
+
+struct TouchRippleView: View {
+    let location: CGPoint?
+    let trigger: Int
+    @State private var scale: CGFloat = 0.2
+    @State private var opacity: Double = 0.0
+    
+    var body: some View {
+        GeometryReader { proxy in
+            if let loc = location, opacity > 0.01 {
+                Circle()
+                    .fill(Color.white.opacity(0.35))
+                    .frame(width: 42, height: 42)
+                    .scaleEffect(scale)
+                    .opacity(opacity)
+                    .position(x: loc.x * proxy.size.width, y: loc.y * proxy.size.height)
+            }
+        }
+        .allowsHitTesting(false)
+        .onChange(of: trigger, perform: { _ in
+            scale = 0.2
+            opacity = 0.8
+            withAnimation(.easeOut(duration: 0.35)) {
+                scale = 2.0
+                opacity = 0.0
+            }
+        })
+    }
 }

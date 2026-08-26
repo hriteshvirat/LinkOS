@@ -236,12 +236,14 @@ struct TrustedDevicesSettingsView: View {
 }
 
 struct AdvancedSettingsView: View {
+    @AppStorage("linkos_developer_mode") private var devModeEnabled = false
     @AppStorage("linkos_debug_overlay") private var debugOverlay = false
     @AppStorage("linkos_structured_logging") private var structuredLogging = true
     
     var body: some View {
         Form {
             Section("Developer") {
+                Toggle("Developer Mode", isOn: $devModeEnabled)
                 Toggle("Show debug overlay", isOn: $debugOverlay)
                 Toggle("Structured logging", isOn: $structuredLogging)
                 

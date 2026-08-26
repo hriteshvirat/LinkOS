@@ -119,9 +119,10 @@ object LinkOSLogger {
             }
             
             val isFeature = when (cat) {
+                "PhoneMirroring" -> true
                 "Input" -> msg.contains("[Trackpad]") || msg.contains("[INPUT]") || msg.contains("Trackpad")
                 "Clipboard" -> msg.contains("[Clipboard]") || msg.contains("Clipboard")
-                "Media" -> msg.contains("[RemoteDesktop]") || msg.contains("RemoteDesktop") || msg.contains("Screen")
+                "Media" -> true
                 "Files" -> msg.contains("[Files]") || msg.contains("File")
                 "Security" -> msg.contains("Permission")
                 "App", "Network" -> msg.contains("Connected") || msg.contains("Disconnected") || msg.contains("activated") || msg.contains("deactivated")

@@ -83,4 +83,27 @@ final class MediaControlService: NSObject, ConnectionStateSubscriber {
         script.executeAndReturnError(&error)
         return error == nil
     }
+    
+    @discardableResult
+    static func runAppleScriptGetString(_ source: String) -> String? {
+        guard let script = NSAppleScript(source: source) else { return nil }
+        var error: NSDictionary?
+        let result = script.executeAndReturnError(&error)
+        if error != nil { return nil }
+        return result.stringValue
+    }
+    
+    static func getSystemVolume() -> Double {
+        if let valStr = runAppleScriptGetString("output volume of (get volume settings)"),
+           let val = Double(valStr) {
+            return val / 100.0
+        }
+        return 0.5
+    }
+    
+    static func setSystemVolume(_ volume: Double) {
+        let volInt = Int(volume * 100.0)
+        _ = runAppleScriptGetString("set volume output volume \(volInt)")
+    }
 }
+

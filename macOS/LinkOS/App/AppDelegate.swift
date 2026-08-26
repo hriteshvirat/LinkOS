@@ -15,11 +15,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables = Set<AnyCancellable>()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Set Notification Center delegate
+        // Set Notification Center delegate and register media actions
         UNUserNotificationCenter.current().delegate = self
+        let openAction = UNNotificationAction(identifier: "OPEN_ACTION", title: "Open", options: [.foreground])
+        let revealAction = UNNotificationAction(identifier: "REVEAL_IN_FINDER_ACTION", title: "Show in Finder", options: [.foreground])
+        let mediaCategory = UNNotificationCategory(identifier: "MEDIA_SAVED", actions: [openAction, revealAction], intentIdentifiers: [], options: [])
+        UNUserNotificationCenter.current().getNotificationCategories { existing in
+            var cats = existing
+            cats.insert(mediaCategory)
+            UNUserNotificationCenter.current().setNotificationCategories(cats)
+        }
         
-        // Initialize structured logging
+        // Initialize structured logging and window frame diagnostics swizzling
         LinkOSLogger.shared.info("LinkOS starting up", category: .app)
+        NSWindow.swizzleDiagnostics()
         
         let bundleID = Bundle.main.bundleIdentifier ?? "UNKNOWN"
         let execPath = Bundle.main.executableURL?.path ?? "UNKNOWN"
@@ -30,15 +39,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         - Bundle Identifier: \(bundleID)
         - Executable Path: \(execPath)
         - Initial AXIsProcessTrusted(): \(trustedBefore)
-        """, category: .security)
-        
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        let promptResult = AXIsProcessTrustedWithOptions(options)
-        let trustedAfter = AXIsProcessTrusted()
-        
-        LinkOSLogger.shared.info("""
-        - AXIsProcessTrustedWithOptions prompt invoked (result: \(promptResult))
-        - Post-Prompt AXIsProcessTrusted(): \(trustedAfter)
         ============================================
         """, category: .security)
         
@@ -195,6 +195,18 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let notifId = response.notification.request.identifier
+        
+        if let path = response.notification.request.content.userInfo["filePath"] as? String {
+            if response.actionIdentifier == "REVEAL_IN_FINDER_ACTION" {
+                NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
+                completionHandler()
+                return
+            } else if response.actionIdentifier == "OPEN_ACTION" || response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+                NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                completionHandler()
+                return
+            }
+        }
         
         var action = "dismiss"
         var replyText: String? = nil

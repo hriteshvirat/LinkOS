@@ -59,6 +59,8 @@ public final class TrustedDeviceStore: ObservableObject {
     public func revokeTrust(deviceId: String) {
         trustedDevices.removeAll { $0.id == deviceId }
         saveDevices()
+        UserDefaults.standard.removeObject(forKey: "PhoneWindowFrameRect_\(deviceId)")
+        UserDefaults.standard.removeObject(forKey: "pm_didUserResize_\(deviceId)")
     }
     
     public func blockDevice(deviceId: String) {

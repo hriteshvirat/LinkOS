@@ -62,6 +62,11 @@ class WebSocketClient @Inject constructor(
     var isManualDisconnect = false
     private var lastReceivedTimeMs = 0L
 
+    val reconnectCount = java.util.concurrent.atomic.AtomicInteger(0)
+    fun queueSize(): Long {
+        return webSocket?.queueSize() ?: 0L
+    }
+
     init {
         scope.launch {
             _state.collect { state ->
@@ -224,6 +229,7 @@ class WebSocketClient @Inject constructor(
         isManualDisconnect = false
         requestPinCodeFromUser.value = false
         destroySession("Starting new pairing attempt")
+        reconnectCount.incrementAndGet()
         
         val sessionId = String.format("%04X", (0..0xFFFF).random())
         val session = PairingSession(sessionId)
@@ -306,9 +312,9 @@ class WebSocketClient @Inject constructor(
     /**
      * Send raw bytes (encrypted if session established).
      */
-    fun send(data: ByteArray) {
+    fun send(data: ByteArray): Boolean {
         val payload = encryptedSession?.encrypt(data) ?: data
-        webSocket?.send(payload.toByteString())
+        return webSocket?.send(payload.toByteString()) ?: false
     }
 
     /**

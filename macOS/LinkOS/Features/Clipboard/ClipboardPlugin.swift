@@ -33,6 +33,7 @@ final class ClipboardPlugin: LinkOSPlugin {
     private var lastSyncedText: String?
     private var lastSyncTimestamp: TimeInterval = 0
     private var lastSyncOrigin: String = "local"
+    private var activationTimestamp: TimeInterval = 0
     
     // MARK: - Offline Buffer
     
@@ -47,6 +48,7 @@ final class ClipboardPlugin: LinkOSPlugin {
     
     func activate() async throws {
         isActive = true
+        self.activationTimestamp = Date().timeIntervalSince1970
         monitor.startMonitoring()
         monitor.onClipboardChanged = { [weak self] item, payload in
             Task {
@@ -119,15 +121,19 @@ final class ClipboardPlugin: LinkOSPlugin {
         self.store.addItem(historyItem)
         LinkOSLogger.shared.info("[Clipboard] Synced clipboard text from Android", category: .clipboard)
         
-        // Show native macOS notification confirming clipboard sync
-        let notifContent = UNMutableNotificationContent()
-        notifContent.title = "Clipboard Synced"
-        let preview = text.count > 40 ? "\(text.prefix(40))…" : text
-        notifContent.body = "✓ Synced from Android: \"\(preview)\""
-        notifContent.sound = .default
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: notifContent, trigger: trigger)
-        try? await UNUserNotificationCenter.current().add(request)
+        // Show native macOS notification confirming clipboard sync only after initial connection phase (> 3.5s)
+        if now - self.activationTimestamp > 3.5 {
+            let notifContent = UNMutableNotificationContent()
+            notifContent.title = "Clipboard Synced"
+            let preview = text.count > 40 ? "\(text.prefix(40))…" : text
+            notifContent.body = "✓ Synced from Android: \"\(preview)\""
+            notifContent.sound = .default
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
+            let request = UNNotificationRequest(identifier: UUID().uuidString, content: notifContent, trigger: trigger)
+            try? await UNUserNotificationCenter.current().add(request)
+        } else {
+            LinkOSLogger.shared.info("[Clipboard] Suppressed initial connection clipboard toast", category: .clipboard)
+        }
         
         if let correlationId = message.correlationId, let manager = connectionManager {
             let responsePayload = "{\"status\":\"success\"}".data(using: .utf8)!

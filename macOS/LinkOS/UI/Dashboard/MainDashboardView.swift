@@ -58,6 +58,10 @@ struct MainDashboardView: View {
     @State private var streamDeckSearchQuery = ""
     @State private var editingButton: StreamDeckButtonConfig? = nil
     @State private var aiPrompt = ""
+    
+    @State private var isPhoneWindowActive = false
+    @State private var isPhoneMirrorFailed = false
+    @State private var isShowingPhoneSettings = false
     @State private var aiResponseLog: [String] = ["System ready. Ask me to: 'screenshot', 'open Terminal', 'mute', or 'open Safari'."]
     @State private var isExecutingAI = false
     
@@ -415,9 +419,26 @@ struct MainDashboardView: View {
     private var headerBar: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(selectedSidebarItem)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white)
+                HStack(alignment: .center, spacing: 12) {
+                    Text(selectedSidebarItem)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+                        
+                    if selectedSidebarItem == "Phone" {
+                        Button(action: { isShowingPhoneSettings.toggle() }) {
+                            Image(systemName: "gearshape.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(isShowingPhoneSettings ? .blue : .gray)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .help("Phone Mirroring Settings")
+                        .popover(isPresented: $isShowingPhoneSettings, arrowEdge: .bottom) {
+                            PhoneMirroringSettingsView()
+                                .frame(width: 450, height: 450)
+                        }
+                    }
+                }
+                
                 Text(appState.isConnected ? "🟢 System Connected & Secure" : "Overview of your connected ecosystem")
                     .font(.system(size: 11))
                     .foregroundStyle(appState.isConnected ? Color(hex: "10B981") : .gray)
@@ -452,27 +473,35 @@ struct MainDashboardView: View {
     private var phonePane: some View {
         VStack(spacing: 24) {
             Spacer()
-            
+    
             if appState.isConnected {
-                Image(systemName: "iphone.radiowaves.left.and.right")
+                Image(systemName: isPhoneWindowActive ? "iphone.radiowaves.left.and.right" : "iphone")
                     .font(.system(size: 64))
                     .foregroundColor(Color(hex: "3B82F6"))
                     .shadow(color: Color(hex: "3B82F6").opacity(0.3), radius: 10)
                 
-                Text("Phone Mirroring Active")
+                Text(isPhoneWindowActive ? (isPhoneMirrorFailed ? "Mirroring Failed" : "Phone Mirroring Active") : "Ready to Mirror")
                     .font(.system(size: 20, weight: .semibold, design: .rounded))
                     .foregroundColor(.white)
                 
-                Text("The live screen of your Android device is mirrored in a floating window.")
+                Text(isPhoneWindowActive ? "The live screen of your Android device is mirrored in a floating window." : "Click below to start a new Phone Mirroring session.")
                     .font(.system(size: 13, design: .rounded))
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
                 
                 Button(action: {
-                    PhoneWindowController.shared.showMirror()
+                    if PhoneSessionManager.shared.activeSession.isSessionAlive {
+                        if isPhoneMirrorFailed {
+                            PhoneWindowController.forceRetry()
+                        } else {
+                            PhoneWindowController.showMirror() // Re-shows or brings to front
+                        }
+                    } else {
+                        PhoneWindowController.showMirror()
+                    }
                 }) {
-                    Text("Bring Window to Front")
+                    Text(PhoneSessionManager.shared.activeSession.isSessionAlive ? (isPhoneMirrorFailed ? "Reconnect" : "Bring Mirroring Window to Front") : "Start Phone Mirroring")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
                         .padding(.horizontal, 24)
@@ -501,9 +530,21 @@ struct MainDashboardView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
-            if appState.isConnected {
-                PhoneWindowController.shared.showMirror()
+            if appState.isConnected && !PhoneSessionManager.shared.userStoppedMirroring {
+                PhoneWindowController.showMirror()
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PhoneWindowActiveStateChanged"))) { _ in
+            isPhoneWindowActive = PhoneSessionManager.shared.activeSession.isSessionAlive
+            isPhoneMirrorFailed = PhoneSessionManager.shared.activeSession.mirrorState == .error || PhoneSessionManager.shared.activeSession.mirrorState == .stopped
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PhoneMirrorStateChanged"))) { _ in
+            isPhoneWindowActive = PhoneSessionManager.shared.activeSession.isSessionAlive
+            isPhoneMirrorFailed = PhoneSessionManager.shared.activeSession.mirrorState == .error || PhoneSessionManager.shared.activeSession.mirrorState == .stopped
+        }
+        .onReceive(PhoneSessionManager.shared.$activeSession) { session in
+            isPhoneWindowActive = session.isSessionAlive
+            isPhoneMirrorFailed = session.mirrorState == .error || session.mirrorState == .stopped
         }
     }
     
@@ -1995,6 +2036,21 @@ struct TrackpadSettingsPane: View {
     @AppStorage("linkos_trackpad_precision_mode") private var precisionMode = false
     @AppStorage("linkos_trackpad_gaming_mode") private var gamingMode = false
     
+    // Pointer Settings
+    @AppStorage("pm_cursor_style") private var cursorStyle: CursorStyle = .whiteCircle
+    @AppStorage("pm_cursor_size") private var cursorSize: Double = 24.0
+    @AppStorage("pm_cursor_opacity") private var cursorOpacity: Double = 0.85
+    @AppStorage("pm_cursor_shadow") private var cursorShadow: Bool = true
+    @AppStorage("pm_cursor_outline") private var cursorOutline: Bool = true
+    @AppStorage("pm_cursor_glow") private var cursorGlow: Bool = false
+    @AppStorage("pm_cursor_tint") private var cursorTintHex: String = "#FFFFFF"
+    @AppStorage("pm_cursor_rotation") private var cursorRotation: Double = 0.0
+    @AppStorage("pm_cursor_hotspot_type") private var cursorHotspotType: HotspotType = .center
+    @AppStorage("pm_cursor_hotspot_x") private var cursorHotspotX: Double = 0.5
+    @AppStorage("pm_cursor_hotspot_y") private var cursorHotspotY: Double = 0.5
+    @AppStorage("pm_cursor_custom_path") private var cursorCustomPath: String = ""
+
+    
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -2039,6 +2095,83 @@ struct TrackpadSettingsPane: View {
                             }
                             Slider(value: $scrollingSensitivity, in: 0.25...3.00, step: 0.05)
                                 .tint(Color(hex: "10B981"))
+                        }
+                    }
+                }
+                
+                // Pointer Customization Card
+                BlueprintCard(title: "Native LinkOS Pointer") {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Picker("Pointer Style", selection: $cursorStyle) {
+                            ForEach(CursorStyle.allCases) { style in
+                                Text(style.rawValue).tag(style)
+                            }
+                        }
+                        .pickerStyle(MenuPickerStyle())
+                        
+                        if cursorStyle == .custom {
+                            HStack {
+                                TextField("Custom File Path (PNG/SVG)", text: $cursorCustomPath)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                Button("Browse...") {
+                                    let panel = NSOpenPanel()
+                                    panel.allowedFileTypes = ["png", "svg", "pdf"]
+                                    if panel.runModal() == .OK, let url = panel.url {
+                                        cursorCustomPath = url.path
+                                    }
+                                }
+                            }
+                        }
+                        
+                        HStack {
+                            Text("Size")
+                                .font(.system(size: 12, weight: .medium))
+                                .frame(width: 60, alignment: .leading)
+                            Slider(value: $cursorSize, in: 12...128, step: 1)
+                            Text("\(Int(cursorSize))pt").font(.system(size: 11)).frame(width: 40, alignment: .trailing)
+                        }
+                        
+                        HStack {
+                            Text("Opacity")
+                                .font(.system(size: 12, weight: .medium))
+                                .frame(width: 60, alignment: .leading)
+                            Slider(value: $cursorOpacity, in: 0.1...1.0, step: 0.05)
+                            Text("\(Int(cursorOpacity * 100))%").font(.system(size: 11)).frame(width: 40, alignment: .trailing)
+                        }
+                        
+                        Divider().opacity(0.1)
+                        
+                        HStack(spacing: 20) {
+                            Toggle("Shadow", isOn: $cursorShadow).toggleStyle(CheckboxToggleStyle())
+                            Toggle("Outline", isOn: $cursorOutline).toggleStyle(CheckboxToggleStyle())
+                            Toggle("Glow", isOn: $cursorGlow).toggleStyle(CheckboxToggleStyle())
+                        }
+                        
+                        Picker("Accent Color", selection: $cursorTintHex) {
+                            Text("White").tag("#FFFFFF")
+                            Text("Black").tag("#000000")
+                            Text("Blue").tag("#3B82F6")
+                            Text("Green").tag("#10B981")
+                            Text("Red").tag("#EF4444")
+                        }
+                        .pickerStyle(MenuPickerStyle())
+                        
+                        if cursorStyle == .custom || cursorStyle == .crosshair {
+                            Picker("Hotspot", selection: $cursorHotspotType) {
+                                ForEach(HotspotType.allCases) { type in
+                                    Text(type.rawValue).tag(type)
+                                }
+                            }
+                            .pickerStyle(MenuPickerStyle())
+                            
+                            if cursorHotspotType == .custom {
+                                HStack {
+                                    Text("X:")
+                                    Slider(value: $cursorHotspotX, in: 0...1)
+                                    Text("Y:")
+                                    Slider(value: $cursorHotspotY, in: 0...1)
+                                }
+                            }
                         }
                     }
                 }
